@@ -140,10 +140,17 @@ machines and waiting areas into position, and writes the resulting layout to
 |---|---|
 | `seqInfo[].seqNum` | Sequence identifier. |
 | `seqInfo[].sequenceList` | Ordered process types a job of this sequence visits. Truncated to match `numStages`. |
-| `performanceInfo` | Multipliers applied to `processTime` by machine performance grade. A machine with grade `B` (0.9) is slower than one with grade `A` (1.0). |
+| `performanceInfo` | Intended as multipliers on `processTime` by machine performance grade. |
 
-`numJob` jobs are injected per sequence, so the shipped configuration produces 3 jobs in total
-(3 sequences × `numJob` = 1).
+`numJob` gives the **total** number of jobs, all created on sequence 1
+(`GlobalVar.setTargetJobs(numJob, 1)`), so the shipped configuration produces one job.
+
+> **Two caveats worth knowing before you tune this file.** Only sequence 1 is instantiated;
+> `seqNum` 2 and 3 are parsed but never used. And routing does not follow `sequenceList` at
+> all — `Scheduler.setNextProcess()` advances a job by stage (`SOURCE → STAGE_B → … → SINK`)
+> and the flexible-flow-shop matching then accepts any free machine in the target stage.
+> `performanceInfo` is likewise loaded into `GlobalVar` but never read back, so the grade
+> multipliers currently have no effect on `processTime`.
 
 ---
 

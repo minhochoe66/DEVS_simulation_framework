@@ -32,9 +32,10 @@ Two properties make the framework useful as an evaluation testbed:
 - **One model, many planners.** The robot model, the environment and the operation logic stay
   fixed while only the planner is replaced, so performance differences are observed under
   controlled conditions.
-- **One model, two evaluation levels.** Instantiating the AMR model alone yields an
-  algorithm-level experiment; adding the Fleet Management System, the Schedule Manager and the
-  Equipment models turns the same code into an operation-level experiment.
+- **One model, two evaluation levels.** The layering keeps the robot model independent of the
+  control and operation models, so an algorithm-level experiment is a matter of instantiating
+  the AMR on its own. This release ships the operation-level driver; see
+  [Scope of this release](#scope-of-this-release).
 
 ## Architecture
 
@@ -286,9 +287,17 @@ To keep the correspondence between article and code honest:
   are not registered; see the table above.
 - The **local layer ships DWA**. The MPC and SAC local planners reported in the article are not
   part of this release.
-- The harness for the algorithm-level trigger-event scenarios (§4.3) is not included. This
-  repository covers the operation-level experiment driver (`main.py`) and the Monte Carlo
-  analysis pipeline.
+- `main.py` is the **operation-level** driver. There is no entry point that instantiates the AMR
+  on its own, and no harness for the algorithm-level scenarios of §4.3 and §5.3 — the
+  trigger-event generator, the random obstacle fields, and the moving obstacles are absent.
+- The collected metrics are lead time, wait time, throughput and planner computation time.
+  The **path-length, success-rate and composite-index metrics of Table 3 are not computed here.**
+- `Sensor` relays exact peer poses rather than performing the ray casting of Fig. 2(a); the range
+  and field-of-view filtering happens in `Local_Planner`. See
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#31-physical-system--amr).
+- Replications draw their variation from the sampling planners (RRT, PRM), not from randomised
+  start, goal or obstacle placement, and **no random seed is set** — so a run is not bit-for-bit
+  reproducible.
 
 ## Branches
 
