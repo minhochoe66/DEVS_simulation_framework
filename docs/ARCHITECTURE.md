@@ -90,8 +90,8 @@ times are in simulated seconds.
 
 #### Sensor — [`atomic/Sensor.py`](../modeling/simulation/PhysicalSystem/atomic/Sensor.py)
 
-Virtual 2-D ray-casting perception (Fig. 2(a)). Objects outside the detection radius are
-filtered out, so the planners only ever see locally observable obstacles.
+Perception. The model keeps a `PoseStorage` of the peer robots it has been told about and
+republishes it to the planners every 100 ms.
 
 | | |
 |---|---|
@@ -99,6 +99,13 @@ filtered out, so the planners only ever see locally observable obstacles.
 | Input ports | `OtherManeuverState_I`, `Complete_job_I` |
 | Output ports | `OtherManeuverState_O` |
 | `ta` | `INIT`, `WAIT` → ∞ · `ACTIVE` → 0.1 |
+
+> **Divergence from the article.** §3.2 and Fig. 2(a) describe the sensor as a virtual 2-D
+> ray-casting device that estimates a surrounding distance distribution and filters objects
+> beyond a detection radius. This release contains no ray casting: `Sensor` relays exact peer
+> poses, and the range and field-of-view filtering happens downstream in `Local_Planner`
+> (an 8 m detection range and a roughly 120° forward cone). The observable effect on the
+> local planner is similar, but the perception model is not the one the article specifies.
 
 #### Global_Planner — [`atomic/Global_Planner.py`](../modeling/simulation/PhysicalSystem/atomic/Global_Planner.py)
 
@@ -277,7 +284,7 @@ instead read directly from a shared object. It is worth knowing about when exten
 | Article element | Implementation |
 |---|---|
 | Fig. 1 — overall architecture | [`modeling/AMRSimModel.py`](../modeling/AMRSimModel.py), [`modeling/simulation/simulation_model.py`](../modeling/simulation/simulation_model.py) |
-| Fig. 2(a) — ray-casting perception | [`atomic/Sensor.py`](../modeling/simulation/PhysicalSystem/atomic/Sensor.py) |
+| Fig. 2(a) — ray-casting perception | [`atomic/Sensor.py`](../modeling/simulation/PhysicalSystem/atomic/Sensor.py) — **partial**, no ray casting; see [§3.1](#31-physical-system--amr) |
 | Fig. 2(b), Eq. 1 — differential-drive kinematics | [`atomic/Maneuver.py`](../modeling/simulation/PhysicalSystem/atomic/Maneuver.py) |
 | Eq. 2 — safety radius `r_s = R + S_min` | `robot_radius` + `safety_margin` in [`DWA.py`](../Algorithm/PathPlanning/Local_path/DWA.py) |
 | Fig. 3(a) — Global Planner DEVS diagram | [`atomic/Global_Planner.py`](../modeling/simulation/PhysicalSystem/atomic/Global_Planner.py) |
