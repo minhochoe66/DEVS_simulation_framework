@@ -8,25 +8,25 @@ import numpy as np
 
 
 class _MinimalPoseBuffer:
-    """AMR 포즈를 간단히 버퍼링하고 CSV로 저장하는 최소 구현."""
+    """AMR 포즈를 버퍼링하여 CSV로 저장하는 최소 구현."""
 
     _global_timestamp = None
-    _global_base_dir = None  # 전체 시뮬레이션의 기본 디렉토리
+    _global_base_dir = None  # 실행 전체의 기본 디렉터리
 
     def __init__(self, iteration_num=None, scenario_label=None):
-        # 전역 타임스탬프는 한 번만 설정 (모든 반복에서 공유)
+        # 타임스탬프는 한 번만 정하고 모든 반복이 공유한다
         if _MinimalPoseBuffer._global_timestamp is None:
             _MinimalPoseBuffer._global_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         self.timestamp = _MinimalPoseBuffer._global_timestamp
         self.iteration_num = iteration_num  # 몬테카를로 반복 번호
-        self.scenario_label = scenario_label  # 시나리오 레이블 (vehicle_change_mode)
+        self.scenario_label = scenario_label  # 시나리오 레이블 (차량 수 변경 모드)
         self.base_dir = None
         self.agent_dir = None
         self.data = {}  # vehicle_id -> last tuple
 
     def add_pose(self, pose):
-        # 기대 필드: pose.strID, pose.x, pose.y, pose.yaw, pose.lin_vel, pose.ang_vel
+        # 필요한 필드: pose.strID, pose.x, pose.y, pose.yaw, pose.lin_vel, pose.ang_vel
         vehicle_name = getattr(pose, 'strID', 'Vehicle')
         self.data[vehicle_name] = (
             getattr(pose, 'x', 0.0),
@@ -38,12 +38,12 @@ class _MinimalPoseBuffer:
 
     def _ensure_dirs(self, base_directory, globalVar=None):
         if self.base_dir is None:
-            # 기본 디렉토리 (타임스탬프)
+            # 타임스탬프 디렉터리
             if _MinimalPoseBuffer._global_base_dir is None:
                 _MinimalPoseBuffer._global_base_dir = os.path.join(
                     base_directory, self.timestamp)
 
-            # 경로 구성: <timestamp>/<scenario_label>/iteration_X 또는 <timestamp>/iteration_X
+            # 경로는 <timestamp>/<scenario>/iteration_X 또는 <timestamp>/iteration_X
             if self.scenario_label:
                 # Vehicle change mode: <timestamp>/<scenario_label>/iteration_X
                 scenario_dir = os.path.join(_MinimalPoseBuffer._global_base_dir, self.scenario_label)
@@ -52,7 +52,7 @@ class _MinimalPoseBuffer:
                 else:
                     self.base_dir = scenario_dir
             else:
-                # 일반 모드: <timestamp>/iteration_X
+                # 단일 차량 수 모드
                 if self.iteration_num is not None:
                     self.base_dir = os.path.join(
                         _MinimalPoseBuffer._global_base_dir, f'iteration_{self.iteration_num}')
@@ -62,12 +62,12 @@ class _MinimalPoseBuffer:
             self.agent_dir = os.path.join(self.base_dir, 'Agent')
             os.makedirs(self.agent_dir, exist_ok=True)
 
-            # 시뮬레이션 실행 당시의 map 정보 저장
+            # 이 반복이 실제로 쓴 레이아웃을 함께 남긴다
             if globalVar:
                 self._save_map_config(globalVar)
 
     def _save_map_config(self, globalVar):
-        """필터링된 장비 정보 및 대기 구역 정보를 map.json으로 저장"""
+        """필터링된 장비와 대기 구역을 map.json으로 저장한다."""
         try:
             equipmentInfo = globalVar.getEquipmentInfo()
 
@@ -105,7 +105,7 @@ class _MinimalPoseBuffer:
                 "WatingareaInfo": waiting_area_list
             }
 
-            # 타임스탬프 폴더에 map.json 저장
+            # 타임스탬프 폴더에 저장
             map_file_path = os.path.join(self.base_dir, 'map.json')
             with open(map_file_path, 'w', encoding='utf-8') as f:
                 json.dump(map_data, f, indent=4, ensure_ascii=False)
@@ -120,7 +120,7 @@ class _MinimalPoseBuffer:
             return
         self._ensure_dirs(base_directory, globalVar)
         for vehicle_name, pose in self.data.items():
-            # 파일명은 Vehicle 접두 유지, maneuver 등의 접미 제거
+            # 파일명은 VEHICLE 접두어만 남기고 _maneuver 같은 접미어는 뗀다
             vehicle_file_id = vehicle_name.split('_')[0]
             file_path = os.path.join(self.agent_dir, f"{vehicle_file_id}.csv")
             is_new = not os.path.exists(file_path)
@@ -139,19 +139,19 @@ class _MinimalPoseBuffer:
 
 
 class Data_collector(DEVSAtomicModel):
-    """AMR 시뮬레이션 데이터 수집 및 분석 통합 모듈.
+    """AMR 시뮬레이션 데이터를 수집하고 분석하는 원자 모델.
 
-    역할:
-    1. 실시간 차량 포즈 수집 및 저장 (CSV)
-    2. 시뮬레이션 종료 시 Job 성능 분석 및 시각화
+    주행 중에는 차량 포즈를 모아 CSV로 남기고, 시뮬레이션이 끝나면
+    작업 성능을 분석하여 그래프와 리포트를 만든다.
 
-    - 입력 포트:
-      - MyManeuverState_I: 자기 차량 포즈
-      - OtherManeuverState_I: 타 차량 포즈(옵션)
-      - Complete_I: 저장 마무리 트리거
-    - 저장 형식:
-      - Visualizations/<timestamp>/Agent/Vehicle*.csv (차량 궤적)
-      - Visualizations/<timestamp>/analysis/ (Job 성능 분석)
+    입력 포트
+        MyManeuverState_I:    자기 차량 포즈
+        OtherManeuverState_I: 다른 차량 포즈 (선택)
+        Complete_I:           저장을 마무리하는 트리거
+
+    저장 위치
+        Visualizations/<timestamp>/.../Agent/VEHICLE*.csv   차량 궤적
+        Visualizations/<timestamp>/.../analysis/            작업 성능 분석
     """
 
     def __init__(self, ID, objConfiguration=None, globalVar=None, base_save_dir=None, iteration_num=None, scenario_label=None):
@@ -168,9 +168,9 @@ class Data_collector(DEVSAtomicModel):
         self.addInputPort('OtherManeuverState_I')
         self.addInputPort('Complete_I')
 
-        # 버퍼 (반복 번호 및 시나리오 레이블 전달)
+        # 포즈 버퍼
         self._pose_buffer = _MinimalPoseBuffer(iteration_num=iteration_num, scenario_label=scenario_label)
-        # 저장 기본 경로 설정 우선순위: 인자 > 설정객체 > 기본값
+        # 저장 경로 우선순위: 생성자 인자 > 설정 객체 > 기본값
         if isinstance(base_save_dir, str) and base_save_dir.strip():
             self._base_save_dir = base_save_dir
         elif hasattr(self.objConfiguration, 'getConfiguration'):
@@ -182,7 +182,7 @@ class Data_collector(DEVSAtomicModel):
         else:
             self._base_save_dir = 'Visualizations'
 
-        # 색상 팔레트 (분석용)
+        # 분석 그래프 색상
         self.colorList = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                           '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
@@ -197,16 +197,16 @@ class Data_collector(DEVSAtomicModel):
     def funcInternalTransition(self):
         state = self.getStateValue('state')
         if state == 'SAVE':
-            # 즉시 저장 후 대기
+            # 즉시 저장하고 대기로 돌아간다
             self._pose_buffer.flush_latest_to_csv(
                 self._base_save_dir, self.globalVar)
             self.setStateValue('state', 'INIT')
         elif state == 'DONE':
-            # 마지막 저장 후 종료 대기 상태
+            # 마지막 저장을 마치고 종료를 기다린다
             self._pose_buffer.flush_latest_to_csv(
                 self._base_save_dir, self.globalVar)
 
-            # Job 성능 분석 수행
+            # 작업 성능 분석
             if self.globalVar:
                 self._analyze_job_performance()
 
@@ -220,24 +220,22 @@ class Data_collector(DEVSAtomicModel):
         state = self.getStateValue('state')
         if state == 'INIT':
             return float('inf')
-        # SAVE/DONE은 즉시 출력(내부전이)로 저장
+        # SAVE와 DONE은 내부 전이로 곧바로 저장한다
         return 0
 
     def funcSelect(self):
         pass
 
     def _analyze_job_performance(self):
-        """Job 성능 분석 및 시각화"""
+        """작업 성능을 분석하고 그래프와 리포트를 만든다."""
         sim_time = self.getTime()
 
-        # Analysis 디렉토리 생성
-        # 몬테카를로 시뮬레이션인 경우: 개별 iteration 폴더 아래에 저장
-        # 단일 시뮬레이션인 경우: base_dir 아래에 저장
+        # 분석 디렉터리를 만든다
+        # 몬테카를로 실행이면 반복 폴더 아래에 둔다
+        # 단일 실행이면 base_dir 아래에 둔다
         if self.iteration_num is not None:
-            # 몬테카를로: iteration_X/analysis/
             analysis_dir = os.path.join(self._pose_buffer.base_dir, 'analysis')
         else:
-            # 단일 시뮬레이션: 전역 analysis/
             if _MinimalPoseBuffer._global_base_dir:
                 analysis_dir = os.path.join(
                     _MinimalPoseBuffer._global_base_dir, 'analysis')
@@ -246,7 +244,7 @@ class Data_collector(DEVSAtomicModel):
                     self._pose_buffer.base_dir, 'analysis')
         os.makedirs(analysis_dir, exist_ok=True)
 
-        # Job 데이터 수집
+        # 작업 데이터 수집
         job_data = self._collect_job_data()
 
         if not job_data:
@@ -256,7 +254,7 @@ class Data_collector(DEVSAtomicModel):
         # CSV 저장
         self._save_job_csv(job_data, analysis_dir)
 
-        # 그래프 생성
+        # 그래프
         self._plot_lead_time(job_data, analysis_dir)
         self._plot_wait_time(job_data, analysis_dir)
         self._plot_throughput(job_data, sim_time, analysis_dir)
@@ -268,28 +266,15 @@ class Data_collector(DEVSAtomicModel):
             f"[{sim_time}][Data_collector] Job analysis complete! Results saved to {analysis_dir}")
 
     def get_iteration_results(self):
-        """
-        몬테카를로 시뮬레이션을 위한 현재 반복 결과 반환
+        """이번 반복의 성능 지표를 반환한다.
 
-        Returns:
-            dict: {
-                'avg_lead_time': float,
-                'avg_wait_time': float,
-                'total_jobs': int,
-                'avg_throughput': float,
-                'sim_time': float,
-                'global_planner_time': float,
-                'global_planner_calls': int,
-                'global_planner_avg': float,
-                'local_planner_time': float,
-                'local_planner_calls': int,
-                'local_planner_avg': float
-            }
+        리드 타임, 대기 시간, 처리량, 완료 작업 수, 시뮬레이션 시간과
+        전역 및 지역 플래너의 계산 시간, 호출 횟수, 평균을 담은 dict다.
         """
         sim_time = self.getTime()
         job_data = self._collect_job_data()
 
-        # 알고리즘 성능 통계 수집
+        # 플래너 계산 시간 통계
         global_time = self.globalVar.GlobalPlanner_algorithm_time if self.globalVar else 0.0
         global_calls = self.globalVar.GlobalPlanner_call_count if self.globalVar else 0
         global_avg = global_time / global_calls if global_calls > 0 else 0.0
@@ -313,15 +298,15 @@ class Data_collector(DEVSAtomicModel):
                 'local_planner_avg': local_avg
             }
 
-        # Lead Time 평균
+        # 평균 리드 타임
         lead_times = [d['lead_time'] for d in job_data]
         avg_lead_time = np.mean(lead_times) if lead_times else 0.0
 
-        # Wait Time 평균
+        # 평균 대기 시간
         wait_times = [d['total_wait_time'] for d in job_data]
         avg_wait_time = np.mean(wait_times) if wait_times else 0.0
 
-        # Throughput 계산
+        # 처리량
         avg_throughput = len(job_data) / sim_time if sim_time > 0 else 0.0
 
         return {
@@ -339,7 +324,7 @@ class Data_collector(DEVSAtomicModel):
         }
 
     def _collect_job_data(self):
-        """Job 데이터 수집"""
+        """완료된 작업의 리드 타임과 대기 시간을 모은다."""
         job_data = []
         target_jobs = self.globalVar.getTargetJobs()
 
@@ -357,7 +342,7 @@ class Data_collector(DEVSAtomicModel):
             complete_time = out_times[-1]
             lead_time = complete_time - start_time
 
-            # Wait Time 계산
+            # 대기 시간
             total_wait_time = 0
             for eqp_id in job_info.dictDoneTime.keys():
                 if eqp_id in job_info.dictOutTime:
@@ -377,7 +362,7 @@ class Data_collector(DEVSAtomicModel):
         return job_data
 
     def _save_job_csv(self, job_data, analysis_dir):
-        """Job 데이터 CSV 저장"""
+        """작업별 지표를 CSV로 저장한다."""
         csv_path = os.path.join(analysis_dir, 'job_summary.csv')
 
         with open(csv_path, 'w', newline='') as csvfile:
@@ -388,7 +373,7 @@ class Data_collector(DEVSAtomicModel):
             writer.writerows(job_data)
 
     def _plot_lead_time(self, job_data, analysis_dir):
-        """Lead Time 시각화"""
+        """리드 타임 그래프."""
         job_ids = [int(d['job_id']) for d in job_data]
         lead_times = [d['lead_time'] for d in job_data]
 
@@ -405,7 +390,7 @@ class Data_collector(DEVSAtomicModel):
         plt.close()
 
     def _plot_wait_time(self, job_data, analysis_dir):
-        """Wait Time 시각화"""
+        """대기 시간 그래프."""
         job_ids = [int(d['job_id']) for d in job_data]
         wait_times = [d['total_wait_time'] for d in job_data]
 
@@ -422,7 +407,7 @@ class Data_collector(DEVSAtomicModel):
         plt.close()
 
     def _plot_throughput(self, job_data, sim_time, analysis_dir):
-        """Job 완료 시간 분포 및 Throughput 시각화"""
+        """작업 완료 시각 분포와 처리량 그래프."""
         complete_times = sorted([d['complete_time'] for d in job_data])
         job_count = list(range(1, len(complete_times) + 1))
 
@@ -440,7 +425,7 @@ class Data_collector(DEVSAtomicModel):
         plt.close()
 
     def _save_summary_report(self, job_data, sim_time, analysis_dir):
-        """요약 리포트 저장"""
+        """요약 리포트를 저장한다."""
         report_path = os.path.join(analysis_dir, 'summary_report.txt')
 
         with open(report_path, 'w') as f:
@@ -457,7 +442,7 @@ class Data_collector(DEVSAtomicModel):
             f.write("-" * 60 + "\n")
             f.write(f"Total Jobs Completed: {len(job_data)}\n\n")
 
-            # Lead Time 통계
+            # 리드 타임 통계
             lead_times = [d['lead_time'] for d in job_data]
             f.write("Lead Time Statistics:\n")
             f.write(f"  - Average: {np.mean(lead_times):.2f}s\n")
@@ -465,7 +450,7 @@ class Data_collector(DEVSAtomicModel):
             f.write(f"  - Max: {np.max(lead_times):.2f}s\n")
             f.write(f"  - Std Dev: {np.std(lead_times):.2f}s\n\n")
 
-            # Wait Time 통계
+            # 대기 시간 통계
             wait_times = [d['total_wait_time'] for d in job_data]
             f.write("Wait Time Statistics:\n")
             f.write(f"  - Average: {np.mean(wait_times):.2f}s\n")
@@ -473,7 +458,7 @@ class Data_collector(DEVSAtomicModel):
             f.write(f"  - Max: {np.max(wait_times):.2f}s\n")
             f.write(f"  - Std Dev: {np.std(wait_times):.2f}s\n\n")
 
-            # Throughput 계산
+            # 처리량
             if sim_time > 0:
                 throughput = len(job_data) / sim_time * 3600  # jobs/hour
                 f.write(f"Throughput: {throughput:.2f} jobs/hour\n")
@@ -481,7 +466,7 @@ class Data_collector(DEVSAtomicModel):
                     len(job_data) if len(job_data) > 0 else 0
                 f.write(f"Average Cycle Time: {avg_cycle_time:.2f}s\n\n")
 
-            # Process 수 통계
+            # 공정 수 통계
             num_processes = [d['num_processes'] for d in job_data]
             f.write("Process Statistics:\n")
             f.write(

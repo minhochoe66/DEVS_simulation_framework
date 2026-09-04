@@ -6,7 +6,7 @@ class FleetManagement(DEVSAtomicModel):
         super().__init__(strID)
         self.globalVar = globalVar
 
-        # States: WAIT (대기), UPDATE (Scheduler 정보 전달), SEND_GO_COMMAND (대기 AMR 이동), SEND_COMMAND (AMR 명령 전송)
+        # States: WAIT, UPDATE (플릿 정보 전달), SEND_GO_COMMAND (대기 AMR 이동), SEND_COMMAND (작업 지시)
         self.stateList = ["WAIT", "UPDATE", "SEND_GO_COMMAND", "SEND_COMMAND"]
         self.state = self.stateList[0]
 
@@ -25,15 +25,15 @@ class FleetManagement(DEVSAtomicModel):
         # Variables
         self.amrPositions = {}  # AMR 위치 정보 저장
         self.lastUpdateTime = 0
-        # AMR별 TransportCommand 저장 {amrID: transportCommand}
+        # AMR별 운반 명령 {amrID: transportCommand}
         self.jobSequences = {}
-        # 현재 전송할 명령 (즉시 전송)
+        # 다음 출력에서 보낼 명령
         self.pendingCommand = None
         self.watingARMCommand = None
 
     def funcExternalTransition(self, strPort, objEvent):
         if strPort == "amrPosition":
-            # AMR 위치 정보 업데이트
+            # AMR 위치 갱신
             amrID = objEvent.strID
             self.amrPositions[amrID] = {
                 'x': objEvent.x,
@@ -44,10 +44,10 @@ class FleetManagement(DEVSAtomicModel):
                 'timestamp': self.getTime()
             }
 
-            # GlobalVar의 Vehicle 정보도 업데이트
+            # GlobalVar의 차량 정보도 함께 갱신
             vehicleInfo = self.globalVar.getVehicleInfoByID(amrID)
             if vehicleInfo:
-                # 도킹 중이면 Equipment에서 설정한 좌표를 유지
+                # 도킹 중에는 Equipment가 설정한 좌표를 유지한다
                 keep_equipment_coords = False
                 if hasattr(vehicleInfo, 'getEquipmentID') and vehicleInfo.getEquipmentID():
                     keep_equipment_coords = True
@@ -55,7 +55,7 @@ class FleetManagement(DEVSAtomicModel):
                 if not keep_equipment_coords:
                     vehicleInfo.setCoordinates([objEvent.x, objEvent.y])
 
-                # 속도가 0이고 작업이 없으면 IDLE 상태로
+                # 정지해 있고 작업이 없으면 IDLE로 되돌린다
                 if objEvent.lin_vel < 0.1 and vehicleInfo.intJobID is None:
                     if vehicleInfo.strState != "IDLE":
                         vehicleInfo.setState("IDLE")
@@ -67,15 +67,15 @@ class FleetManagement(DEVSAtomicModel):
                 f"[{self.getTime()}][FleetManagement] AMR {amrID} position updated: ({objEvent.x:.2f}, {objEvent.y:.2f}), State: {vehicleInfo.strState if vehicleInfo else 'Unknown'}"
             )
 
-            # UPDATE 상태로 전환 (Scheduler에게 전달하기 위해)
-            # WAIT 상태일 때만 전환 (COMMAND 처리 중이면 방해하지 않음)
+            # Scheduler에 알리기 위해 UPDATE로 전이한다
+            # WAIT일 때만 전이한다. 명령 처리 중이면 방해하지 않는다
             if self.state == "WAIT":
                 self.state = self.stateList[1]  # UPDATE
 
             return True
 
         elif strPort == "taskAssign":
-            # Scheduler로부터 TransportCommand 수신
+            # Scheduler가 보낸 운반 명령
             transportCommand = objEvent
             amrID = transportCommand.assignedAMR
             jobID = transportCommand.jobID
@@ -84,7 +84,7 @@ class FleetManagement(DEVSAtomicModel):
                 f"[{self.getTime()}][FleetManagement] Received TransportCommand: {transportCommand}"
             )
 
-            # AMR이 새 작업을 할당받으면 모든 Equipment의 undockedAMRs에서 제거
+            # 새 작업을 받은 AMR은 모든 장비의 undockedAMRs에서 뺀다
             for equipmentInfo in self.globalVar.getEquipmentInfo().values():
                 if amrID in equipmentInfo.undockedAMRs:
                     equipmentInfo.undockedAMRs.remove(amrID)
@@ -92,15 +92,13 @@ class FleetManagement(DEVSAtomicModel):
                         f"[{self.getTime()}][FleetManagement] 🗑️ Removed AMR {amrID} from Equipment {equipmentInfo.strEquipmentID} undocked list"
                     )
 
-            # WaitingArea는 점유 개념 미사용 → 해제 로직 제거
-
-            # TransportCommand 저장 (AMR별로)
+            # AMR별로 운반 명령을 보관한다
             self.jobSequences[amrID] = transportCommand
             self.globalVar.printTerminal(
                 f"[{self.getTime()}][FleetManagement] 📋 Stored TransportCommand for AMR {amrID}: {transportCommand.commandID}"
             )
 
-            # FROM Equipment로 이동 명령 생성 (TransportCommand에서 정보 조회)
+            # 픽업 장비로 보내는 이동 명령을 만든다
             self.pendingCommand = {
                 'amrID': amrID,
                 'jobID': jobID,
@@ -109,27 +107,26 @@ class FleetManagement(DEVSAtomicModel):
                 'toPosition': transportCommand.getToPosition(),
                 'fromNodeID': transportCommand.getFromNodeID(),
                 'toNodeID': transportCommand.getToNodeID(),
-                'action': 'TRANSPORT',  # FROM → TO 운반
-                'phase': 'TO_FROM'  # FROM Equipment로 이동
+                'action': 'TRANSPORT',  # FROM -> TO 운반
+                'phase': 'TO_FROM'  # 먼저 FROM 장비로
             }
 
             self.globalVar.printTerminal(
                 f"[{self.getTime()}][FleetManagement] 📥 Command prepared for AMR {amrID}: {transportCommand.getFromNodeID()} → {transportCommand.getToNodeID()}"
             )
 
-            # SEND_COMMAND 상태로 전환하여 즉시 전송
+            # 즉시 보내기 위해 SEND_COMMAND로 전이
             self.state = self.stateList[3]  # SEND_COMMAND
 
             return True
 
         elif strPort == "undockingComplete_I":
-            # Local_Planner로부터 언도킹 완료 신호 수신
+            # Local_Planner가 보낸 언도킹 완료
             amrID = objEvent[0]
             equipmentID = objEvent[1]
             jobID = objEvent[2]
             transportPhase = objEvent[3]
 
-            # 현재 AMR 위치 확인
             vehicleInfo = self.globalVar.getVehicleInfoByID(amrID)
             current_coords = vehicleInfo.getCoordinates() if vehicleInfo else "Unknown"
 
@@ -137,11 +134,10 @@ class FleetManagement(DEVSAtomicModel):
                 f"[{self.getTime()}][FleetManagement] 🚪 UNDOCKING complete: AMR {amrID} from {equipmentID}, Phase: {transportPhase}"
             )
 
-            # === Phase별 분기 처리 (elif로 명확히 구분) ===
+            # 여기서부터 운반 phase에 따라 분기한다
 
-            # 1️⃣ WAITING phase 처리 (WaitingArea 도착 완료)
+            # WAITING: 대기 구역에 도착한 경우
             if transportPhase == "WAITING":
-                # WaitingArea 도착 처리 (점유 관리 없음)
                 waitingArea = self.globalVar.getWaitingAreaInfoByID(
                     equipmentID)
                 if waitingArea:
@@ -154,7 +150,7 @@ class FleetManagement(DEVSAtomicModel):
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][FleetManagement] 🅿️ AMR {amrID} arrived at WaitingArea {equipmentID} - Now IDLE"
                 )
-                # 대기 도착 시 해당 AMR 관련 보류 명령/이동 명령 정리
+                # 대기 구역에 도착했으면 그 AMR의 보류 명령을 정리한다
                 if self.pendingCommand and self.pendingCommand.get('amrID') == amrID:
                     self.globalVar.printTerminal(
                         f"[{self.getTime()}][FleetManagement] 🧹 Clearing pendingCommand for AMR {amrID} (arrived WAITING)"
@@ -170,17 +166,16 @@ class FleetManagement(DEVSAtomicModel):
                     self.globalVar.printTerminal(
                         f"[{self.getTime()}][FleetManagement] 📝 Removed TransportCommand for AMR {amrID}"
                     )
-                # Scheduler에게 AMR 상태 업데이트 알림
+                # Scheduler에 상태 변화를 알린다
                 self.state = self.stateList[1]  # UPDATE
 
-            # 2️⃣ TO_DESTINATION phase 처리 (Job 완료 또는 WaitingArea 도착)
+            # TO_DESTINATION: 작업 완료이거나 대기 구역 도착
             elif transportPhase == "TO_DESTINATION":
-                # WaitingArea와 Equipment 구분
+                # 목적지가 대기 구역인지 장비인지 구분한다
                 is_waiting_area = equipmentID and equipmentID.startswith(
                     'WAITING_AREA')
 
                 if is_waiting_area:
-                    # WaitingArea 도착 처리 (점유 관리 없음)
                     waitingArea = self.globalVar.getWaitingAreaInfoByID(
                         equipmentID)
                     if waitingArea:
@@ -193,7 +188,7 @@ class FleetManagement(DEVSAtomicModel):
                     self.globalVar.printTerminal(
                         f"[{self.getTime()}][FleetManagement] 🅿️ AMR {amrID} arrived at WaitingArea {equipmentID} - Now IDLE"
                     )
-                    # 대기 도착 시 해당 AMR 관련 보류 명령/이동 명령 정리
+                    # 대기 구역에 도착했으면 그 AMR의 보류 명령을 정리한다
                     if self.pendingCommand and self.pendingCommand.get('amrID') == amrID:
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][FleetManagement] 🧹 Clearing pendingCommand for AMR {amrID} (arrived WAITING)"
@@ -210,7 +205,7 @@ class FleetManagement(DEVSAtomicModel):
                             f"[{self.getTime()}][FleetManagement] 📝 Removed TransportCommand for AMR {amrID}"
                         )
                 else:
-                    # Equipment 도착 처리 (Job 완료)
+                    # 장비 도착: 작업 완료
                     equipmentInfo = self.globalVar.getEquipmentInfoByID(
                         equipmentID)
                     if equipmentInfo:
@@ -223,7 +218,7 @@ class FleetManagement(DEVSAtomicModel):
                         vehicleInfo.setJobID(None)
                         vehicleInfo.setState("IDLE")
 
-                    # TransportCommand 정리
+                    # 운반 명령 정리
                     if amrID in self.jobSequences:
                         del self.jobSequences[amrID]
 
@@ -231,19 +226,18 @@ class FleetManagement(DEVSAtomicModel):
                         f"[{self.getTime()}][FleetManagement] ✅ AMR {amrID} is now FREE - Job #{jobID} completed"
                     )
 
-                # Scheduler에게 AMR 상태 업데이트 알림 (항상 전송)
-                # UPDATE - IDLE AMR이 생겼으므로 다음 작업 할당 가능
+                # 유휴 AMR이 생겼으므로 Scheduler에 알려 다음 작업을 받게 한다
                 self.state = self.stateList[1]  # UPDATE
 
-            # 3️⃣ TO_FROM phase 처리 (FROM Equipment 언도킹 → TO Equipment로 이동)
+            # TO_FROM: 픽업 장비에서 언도킹했으니 목적지 장비로 보낸다
             elif transportPhase == "TO_FROM" and amrID in self.jobSequences:
                 transportCommand = self.jobSequences[amrID]
 
-                # TransportCommand에서 TO Equipment 정보 조회
+                # 운반 명령에서 목적지 장비를 읽는다
                 nextNodeID = transportCommand.getToNodeID()
                 nextEquipmentID = nextNodeID.split('_')[0]  # "B-1_IN" -> "B-1"
 
-                # AMR 현재 위치 (outputPort에서 출발)
+                # AMR은 출력 포트에서 출발한다
                 currentEquipmentInfo = self.globalVar.getEquipmentInfoByID(
                     equipmentID)
                 nextEquipmentInfo = self.globalVar.getEquipmentInfoByID(
@@ -254,7 +248,7 @@ class FleetManagement(DEVSAtomicModel):
                         'position')
                     nextPos = transportCommand.getToPosition()
 
-                    # TO Equipment로 이동 명령 생성 (먼저 저장)
+                    # 목적지 장비로 가는 이동 명령을 만들어 보류해 둔다
                     self.pendingCommand = {
                         'amrID': amrID,
                         'jobID': jobID,
@@ -264,16 +258,16 @@ class FleetManagement(DEVSAtomicModel):
                         'fromNodeID': equipmentID + '_OUT',
                         'toNodeID': nextNodeID,
                         'action': 'TRANSPORT_NEXT',
-                        'phase': 'TO_DESTINATION'  # TO Equipment로 이동
+                        'phase': 'TO_DESTINATION'  # 목적지 장비로
                     }
 
-                    # TO Equipment에 언도킹된 AMR 확인
+                    # 목적지 장비 앞에 언도킹한 채 서 있는 AMR이 있는지 본다
                     if nextEquipmentInfo.undockedAMRs:
-                        # 대기 중인 AMR에게 "비켜라" 명령 생성
+                        # 서 있는 AMR에게 비켜 달라는 이동 명령을 만든다
                         waitingAMR = list(nextEquipmentInfo.undockedAMRs)[
                             0]  # 첫 번째 AMR
 
-                        # 대기 중인 AMR의 현재 위치 가져오기
+                        # 비켜야 할 AMR의 현재 위치
                         waitingVehicleInfo = self.globalVar.getVehicleInfoByID(
                             waitingAMR)
                         if waitingVehicleInfo and waitingAMR in self.amrPositions:
@@ -281,10 +275,10 @@ class FleetManagement(DEVSAtomicModel):
                             current_pos = [
                                 waiting_pose['x'], waiting_pose['y']]
                         else:
-                            # 위치 정보 없으면 Equipment outputPort 위치 사용
+                            # 위치를 모르면 장비 출력 포트를 쓴다
                             current_pos = [nextPos['x'], nextPos['y']]
 
-                        # 가장 가까운 WaitingArea 찾기 (점유 상태 무시)
+                        # 가장 가까운 대기 구역으로 보낸다. 대기 구역은 배타적이지 않다
                         closestArea = self.globalVar.getClosestWaitingArea(
                             current_pos)
 
@@ -293,12 +287,11 @@ class FleetManagement(DEVSAtomicModel):
                             target_y = closestArea.position['y']
                             areaID = closestArea.strAreaID
 
-                            # WaitingArea 예약 로직 제거 - 여러 AMR이 같은 곳으로 갈 수 있음
                             self.globalVar.printTerminal(
                                 f"[{self.getTime()}][FleetManagement] 🅿️ Directing AMR {waitingAMR} to closest WaitingArea {areaID}"
                             )
                         else:
-                            # WaitingArea가 없음 - 현재 위치에서 10m 전진
+                            # 대기 구역이 없으면 현재 위치에서 10 m 전진시킨다
                             self.globalVar.printTerminal(
                                 f"[{self.getTime()}][FleetManagement] ⚠️ No WaitingArea found! Fallback to 10m forward."
                             )
@@ -311,7 +304,7 @@ class FleetManagement(DEVSAtomicModel):
                                 distance * math.sin(current_yaw)
                             areaID = None
 
-                        # Equipment undockedAMRs에서 제거 (WaitingArea든 10m 전진이든 항상 실행)
+                        # 두 경우 모두 장비의 undockedAMRs에서 제거한다
                         if waitingAMR in nextEquipmentInfo.undockedAMRs:
                             nextEquipmentInfo.undockedAMRs.remove(waitingAMR)
                             destination = f"WaitingArea {areaID}" if areaID else f"10m forward to ({target_x:.2f}, {target_y:.2f})"
@@ -334,14 +327,14 @@ class FleetManagement(DEVSAtomicModel):
                             f"[{self.getTime()}][FleetManagement] 🚶 Asking AMR {waitingAMR} to move to ({target_x:.2f}, {target_y:.2f})"
                         )
 
-                        # SEND_GO_COMMAND 상태로 전환 (먼저 대기 AMR에게 명령)
+                        # 비켜 달라는 명령을 먼저 보낸다
                         self.state = self.stateList[2]  # SEND_GO_COMMAND
                     else:
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][FleetManagement] ✅ TO Equipment {nextEquipmentID}에 대기 중인 AMR 없음"
                         )
 
-                        # SEND_COMMAND 상태로 바로 전환
+                        # 막는 AMR이 없으면 바로 작업 지시를 보낸다
                         self.state = self.stateList[3]  # SEND_COMMAND
 
                     self.globalVar.printTerminal(
@@ -352,7 +345,7 @@ class FleetManagement(DEVSAtomicModel):
                         f"[{self.getTime()}][FleetManagement] ⚠️ Equipment info not found: {equipmentID} or {nextEquipmentID}"
                     )
 
-            # 4️⃣ 기타: TransportCommand가 없는 경우
+            # 그 밖의 경우: 이 AMR에 걸린 운반 명령이 없다
             else:
                 if transportPhase == "TO_FROM":
                     self.globalVar.printTerminal(
@@ -374,7 +367,7 @@ class FleetManagement(DEVSAtomicModel):
 
     def funcOutput(self):
         if self.state == "UPDATE":
-            # Scheduler에게 Fleet 정보 전달
+            # 플릿 정보를 Scheduler로 보낸다
             self.addOutputEvent("fleetInfo", self.amrPositions.copy())
 
             self.globalVar.printTerminal(
@@ -384,7 +377,7 @@ class FleetManagement(DEVSAtomicModel):
             return True
 
         elif self.state == "SEND_GO_COMMAND":
-            # 대기 중인 AMR에게 "비켜라" 명령 전송
+            # 비켜 달라는 이동 명령을 보낸다
             if self.watingARMCommand:
                 self.addOutputEvent("amrGoCommand", self.watingARMCommand)
 
@@ -395,7 +388,7 @@ class FleetManagement(DEVSAtomicModel):
             return True
 
         elif self.state == "SEND_COMMAND":
-            # 준비된 명령 전송
+            # 보류해 둔 명령을 보낸다
             if self.pendingCommand:
                 self.addOutputEvent("amrCommand", self.pendingCommand)
 
@@ -413,19 +406,19 @@ class FleetManagement(DEVSAtomicModel):
 
     def funcInternalTransition(self):
         if self.state == "UPDATE":
-            # UPDATE 완료 후 WAIT로 복귀
+            # UPDATE를 마치면 WAIT으로 돌아간다
             self.state = self.stateList[0]  # WAIT
             self.lastUpdateTime = self.getTime()
             return True
 
         elif self.state == "SEND_GO_COMMAND":
-            # GO 명령 전송 완료 후 SEND_COMMAND로 전환 (pendingCommand 전송 준비)
+            # 비켜라 명령을 보냈으면 이어서 보류 명령을 보낸다
             self.watingARMCommand = None
             self.state = self.stateList[3]  # SEND_COMMAND
             return True
 
         elif self.state == "SEND_COMMAND":
-            # 명령 전송 완료 후 명령 초기화 및 WAIT로 복귀
+            # 명령을 보냈으면 비우고 WAIT으로 돌아간다
             self.pendingCommand = None
             self.state = self.stateList[0]  # WAIT
             return True

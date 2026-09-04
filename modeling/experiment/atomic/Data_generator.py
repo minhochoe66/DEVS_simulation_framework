@@ -51,10 +51,9 @@ class Data_generator(DEVSAtomicModel):
             return float('inf')
 
     def checkEquipmentState(self):
-        """SOURCE 장비(A-1) 상태 확인"""
+        """job을 낼 수 있는 SOURCE 장비를 수집한다."""
         equipmentInfo = self.globalVar.getEquipmentInfo()
 
         for key, value in equipmentInfo.items():
-            # processType이 "SOURCE"인 장비 체크 (A-1)
             if key not in self.availableEquipments and value.strType == "SOURCE" and value.strState == "EMPTY":
                 self.availableEquipments.append(key)

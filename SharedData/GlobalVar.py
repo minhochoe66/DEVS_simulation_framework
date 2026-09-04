@@ -33,7 +33,7 @@ class GlobalVar:
         return self.LocalPlanner_algorithm_time
 
     def print_algorithm_statistics(self):
-        """알고리즘 실행 시간 통계 출력"""
+        """플래너 계산 시간 통계를 출력한다."""
         print("\n" + "="*70)
         print("📊 ALGORITHM PERFORMANCE STATISTICS")
         print("="*70)
@@ -158,7 +158,7 @@ class GlobalVar:
 
     ## function for obstacle information (BoundingBox) ##
     def setObstacleInfo(self):
-        """모든 Equipment의 BoundingBox를 장애물로 등록"""
+        """모든 Equipment의 BoundingBox를 정적 장애물로 등록한다."""
         for key, value in self.equipmentInfo.items():
             # Input Port BoundingBox
             if value.inputPort is not None:
@@ -194,7 +194,7 @@ class GlobalVar:
 
     ## function for waiting area information ##
     def setWaitingAreaInfo(self):
-        """Configuration에서 WaitingArea 정보 로드"""
+        """Configuration에서 WaitingArea 정보를 읽는다."""
         if self.objConfiguration:
             watingAreaList = self.objConfiguration.getConfiguration(
                 "watingAreaInfo")
@@ -216,13 +216,12 @@ class GlobalVar:
         return self.watingAreaInfo.get(str(ID), None)
 
     def getClosestWaitingArea(self, position):
-        """가장 가까운 WaitingArea 찾기 (점유 상태 무시 - 여러 AMR 동시 사용 가능)"""
+        """가장 가까운 WaitingArea를 찾는다. WaitingArea는 배타적이지 않아 여러 AMR이 함께 쓸 수 있다."""
         import math
         min_distance = float('inf')
         closest_area = None
 
         for areaID, area in self.watingAreaInfo.items():
-            # 점유 상태 체크 제거 - 여러 AMR이 같은 WaitingArea 사용 가능
 
             area_pos = area.position
             distance = math.sqrt(
@@ -259,7 +258,6 @@ class WatingArea:
         self.strAreaID = str(areaID)
         self.position = position
         self.boundingBox = boundingBox
-        # Equipment의 undockedAMRs와 동일하게 set으로 관리
         self.occupiedAMRs = set()  # WaitingArea에 있는 AMR ID들
 
 
@@ -268,15 +266,15 @@ class Equipment:
         self.strEquipmentID = str(equipmentID)
         self.strStageID = str(stageID)
 
-        # 입력 포트 (AMR이 작업 투입)
+        # 입력 포트. AMR이 작업을 넣는 곳
         # {'nodeID': 'B-1_IN', 'position': {...}, 'boundingBox': {...}}
         self.inputPort = inputPort
 
-        # 출력 포트 (AMR이 작업 회수)
+        # 출력 포트. AMR이 작업을 가져가는 곳
         # {'nodeID': 'B-1_OUT', 'position': {...}, 'boundingBox': {...}}
         self.outputPort = outputPort
 
-        # 작업 위치 (장비 본체)
+        # 작업 위치. 장비 본체
         # {'nodeID': 'B-1_WORK', 'position': {...}, 'boundingBox': {...}}
         self.workPosition = workPosition
 
@@ -290,7 +288,7 @@ class Equipment:
         self.lstProcessingJobID = []
         self.totalProcessedTime = 0
 
-        # UNDOCKING된 AMR ID 저장 (set)
+        # 언도킹한 AMR ID
         self.undockedAMRs = set()
 
     def setEquipmentState(self, state):
@@ -379,11 +377,11 @@ class Vehicle:
             print(f"🔄 [AMR_STATE] {self.strVehicleID}: {old_state} → {state}")
 
     def setCoordinates(self, coorinates):
-        # 디버깅: 좌표 변경 추적
+        # 좌표 변경 추적용 디버그 출력
         import traceback
         import inspect
 
-        # 호출자 정보 가져오기
+        # 호출자 정보
         stack = traceback.extract_stack()
         caller_info = stack[-2] if len(stack) >= 2 else None
         caller_file = caller_info.filename.split(

@@ -11,37 +11,34 @@ import datetime
 
 
 def extract_numbers(input_string):
-    """ 정규 표현식을 사용하여 문자열에서 숫자만 추출 """
+    """문자열에서 숫자만 뽑아낸다."""
     numbers = re.findall(r'\d+', input_string)
     return ''.join(numbers)
 
 
 class Maneuver(DEVSAtomicModel):
-    """ 개선된 Maneuver 클래스 구현 """
+    """차동 구동 운동학으로 로봇의 위치와 자세를 갱신하는 원자 모델."""
 
     def __init__(self, ID, objConfiguration, globalVar=None):
         super().__init__(ID)
 
-        # DEVS 모델 필수 설정
         self.objConfiguration = objConfiguration
         self.globalVar = globalVar  # optional; may be None
 
-        # ID 설정
-
-        # 포트 설정
+        # 포트
         self.addInputPort("RequestManeuver_I")
         self.addInputPort("Docking_I")
         self.addInputPort("StopSim")
         self.addInputPort("Undocking")  # Local_Planner로부터 언도킹 신호
         self.addOutputPort("MyManeuverState_O")
         self.addInputPort("amrCommand")
-        # 기본 DEVS 상태 변수
+        # DEVS 상태 변수
         self.addStateVariable("state", "INIT")
 
-        # 직접 속성으로 관리할 상태 변수들
-        self.dt = 0.1  # 시간 간격
+        # 속성으로 직접 관리하는 상태
+        self.dt = 0.1  # 적분 간격
 
-        # 위치 정보 저장
+        # 위치와 자세
 
         self.current_position_x = self.globalVar.getVehicleInfoByID(
             self.ID.split('_', 1)[0]).getCoordinates()[0]
@@ -70,14 +67,14 @@ class Maneuver(DEVSAtomicModel):
         self.target_tolerance = self.objConfiguration.getConfiguration(
             'target_tolerance')
 
-        # 제어 관련 변수
+        # 제어 변수
         self.last_acceleration = 0.0
 
-        # 경로 계획
+        # 경로
         self.path = []
         self.current_waypoint_index = 0
 
-        # 디버깅 플래그
+        # 디버그 플래그
         self.debug_mode = True
 
     def funcExternalTransition(self, strPort, objEvent):
@@ -119,17 +116,17 @@ class Maneuver(DEVSAtomicModel):
                     new_target_x = objEvent.dblPositionX
                     new_target_y = objEvent.dblPositionY
 
-                    # 목표 위치 업데이트
+                    # 목표 위치 갱신
                     self.target_x = new_target_x
                     self.target_y = new_target_y
 
-                    # 상태를 Move로 변경
+                    # Move로 전이
                     self.setStateValue("state", "Move")
 
                     self.continueTimeAdvance()
 
             elif strPort == "Docking_I":
-                # 이동 중 도킹 지시: 즉시 도킹 좌표로 고정하고 정지
+                # 주행 중 도킹 지시를 받으면 도킹 좌표에 고정하고 정지한다
                 if objEvent.strID.split('_', 1)[0] == self.ID.split('_', 1)[0]:
                     self.target_x = objEvent.dblPositionX
                     self.target_y = objEvent.dblPositionY
@@ -138,7 +135,7 @@ class Maneuver(DEVSAtomicModel):
                     self.current_position_lin_vel = 0.0
                     self.current_position_ang_vel = 0.0
 
-                    # 오른쪽(우) 방향을 0rad로 정의: yaw 고정
+                    # 오른쪽을 0 rad으로 두고 yaw를 고정한다
                     self.current_position_yaw = 0.0
 
                     vehicle_id = self.ID.split('_', 1)[0]
@@ -152,14 +149,14 @@ class Maneuver(DEVSAtomicModel):
                         f"[{self.getTime()}][Maneuver] DOCKING: Set heading to IN direction (0°)")
 
         if strPort == "Complete_I":
-            # 도착 시 움직임 멈춤
+            # 도착하면 정지
             self.current_position_lin_vel = 0.0
             self.current_position_ang_vel = 0.0
             self.setStateValue("state", "WAIT")
 
-        # 언도킹 신호 처리 (모든 상태에서)
+        # 언도킹 신호는 어느 상태에서든 받는다
         if strPort == "Undocking_I":
-            # 언도킹 목표 좌표 설정
+            # 언도킹 목표 좌표
             event_id = objEvent.strID.split('_', 1)[0]
             my_id = self.ID.split('_', 1)[0]
 
@@ -181,7 +178,7 @@ class Maneuver(DEVSAtomicModel):
                 self.current_position_x = objEvent.dblPositionX
                 self.current_position_y = objEvent.dblPositionY
 
-                # 오른쪽(우) 방향을 0rad로 정의: yaw 고정
+                # 오른쪽을 0 rad으로 두고 yaw를 고정한다
                 self.current_position_yaw = 0.0
 
                 self.globalVar.getVehicleInfoByID(vehicle_id).setCoordinates(
@@ -197,31 +194,31 @@ class Maneuver(DEVSAtomicModel):
                 self.setStateValue("state", "Docking")
 
     def funcInternalTransition(self):
-        """ 내부 상태 전이 로직 """
+        """내부 상태 전이."""
         state = self.getStateValue("state")
         if state == "Move":
-            # 위치 업데이트만 수행 (기동 제어)
+            # 위치만 적분한다
             self.update_position()
-            # Move 상태 유지 - 목표 도달 판단은 Global Planner가 담당
+            # Move를 유지한다. 목표 도달 판단은 Global_Planner가 한다
             self.setStateValue("state", "Move")
 
         elif state == "Backup":
             self.update_position(backward=True)
-            # 짧은 시간 후 WAIT으로 복귀 (LocalPlanner가 재판단)
+            # 잠시 뒤 WAIT으로 돌아가 Local_Planner가 다시 판단하게 한다
             self.setStateValue("state", "WAIT")
         elif state == "INIT":
             self.setStateValue("state", "WAIT")
-            # WAIT 상태에서는 아무것도 하지 않음
+            # WAIT에서는 아무것도 하지 않는다
         elif state == "Undocking":
             self.setStateValue("state", "WAIT")
 
     def funcOutput(self):
-        """ 출력 생성 """
+        """출력 함수."""
         state = self.getStateValue("state")
         if state == "Move" or state == "WAIT" or state == "INIT":
 
-            # 현재 위치 정보를 담은 메시지 생성
-            # vehicle ID 추출 (예: 'VEHICLE0000000000001_maneuver' -> 'VEHICLE0000000000001')
+            # 현재 자세를 담은 메시지
+            # 모델 ID에서 차량 ID를 뽑는다 ('VEHICLE...001_maneuver' -> 'VEHICLE...001')
             vehicle_id = self.ID.rsplit(
                 '_', 1)[0] if '_' in self.ID else self.ID
 
@@ -234,23 +231,22 @@ class Maneuver(DEVSAtomicModel):
                 self.current_position_ang_vel,
             )
 
-            # 출력 이벤트 추가
             self.addOutputEvent("MyManeuverState_O", msg)
         elif state == "Docking":
             vehicle_id = self.ID.split('_', 1)[0]
 
-            # GlobalVar에서 최신 좌표 가져오기
+            # GlobalVar에서 최신 좌표를 읽는다
             x = self.globalVar.getVehicleInfoByID(
                 vehicle_id).getCoordinates()[0]
             y = self.globalVar.getVehicleInfoByID(
                 vehicle_id).getCoordinates()[1]
 
-            # 내부 좌표 고정 및 발행
+            # 내부 좌표를 고정하고 발행한다
             self.current_position_x = x
             self.current_position_y = y
             self.current_position_lin_vel = 0.0
             self.current_position_ang_vel = 0.0
-            # 오른쪽(우) 방향을 0rad로 정의: yaw 고정
+            # 오른쪽을 0 rad으로 두고 yaw를 고정한다
             self.current_position_yaw = 0.0
 
             msg = MsgCurrentPose(
@@ -266,18 +262,18 @@ class Maneuver(DEVSAtomicModel):
         elif state == "Undocking":
             vehicle_id = self.ID.split('_', 1)[0]
 
-            # GlobalVar에서 업데이트된 좌표 읽어오기 (outputPort 좌표)
+            # GlobalVar가 갱신한 출력 포트 좌표를 읽는다
             x = self.globalVar.getVehicleInfoByID(
                 vehicle_id).getCoordinates()[0]
             y = self.globalVar.getVehicleInfoByID(
                 vehicle_id).getCoordinates()[1]
 
-            # 내부 좌표도 업데이트
+            # 내부 좌표도 맞춘다
             self.current_position_x = x
             self.current_position_y = y
             self.current_position_lin_vel = 0.0
             self.current_position_ang_vel = 0.0
-            # 오른쪽(우) 방향을 0rad로 정의: yaw 고정
+            # 오른쪽을 0 rad으로 두고 yaw를 고정한다
             self.current_position_yaw = 0.0
 
             msg = MsgCurrentPose(
@@ -292,7 +288,7 @@ class Maneuver(DEVSAtomicModel):
             return True
 
     def funcTimeAdvance(self):
-        """ 시간 전이 함수 """
+        """시간 전이 함수."""
         state = self.getStateValue("state")
         if state == "Move":
             return 0.1
@@ -306,28 +302,28 @@ class Maneuver(DEVSAtomicModel):
             return 0
 
     def update_position(self, backward: bool = False):
-        """개선된 위치 정보 업데이트 로직"""
+        """선속도와 각속도로 위치와 자세를 한 스텝 적분한다."""
 
-        # tracking_only 모드에서는 특별한 처리
+        # tracking_only 프로파일은 따로 처리한다
         current_profile = self.objConfiguration.getConfiguration(
             "currentProfile")
         if current_profile == "tracking_only":
-            # 목표까지의 거리가 매우 가까우면 정지
+            # 목표에 충분히 가까우면 정지한다
             dx = self.target_x - self.current_position_x
             dy = self.target_y - self.current_position_y
             distance = math.sqrt(dx**2 + dy**2)
 
-            if distance < 0.1:  # 0.1m 이하면 정지
+            if distance < 0.1:  # 0.1 m 이하
                 self.current_position_lin_vel = 0.0
                 self.current_position_ang_vel = 0.0
                 return
 
-        # 목표까지의 벡터 계산
+        # 목표까지의 벡터
         dx = self.target_x - self.current_position_x
         dy = self.target_y - self.current_position_y
         distance = math.sqrt(dx**2 + dy**2)
 
-        # 디버깅: 목표 방향 확인 (1초마다만 출력)
+        # 목표 방향 디버그 출력. 1초에 한 번만
         if not hasattr(self, '_last_debug_time'):
             self._last_debug_time = 0
 
@@ -343,71 +339,70 @@ class Maneuver(DEVSAtomicModel):
                 f"   Yaw: {self.current_position_yaw:.2f}, Vel: {self.current_position_lin_vel:.2f}")
             self._last_debug_time = self.getTime()
 
-        # 목표 각도 계산
+        # 목표 방위각
         target_angle = math.atan2(dy, dx)
 
-        # 현재 방향과 목표 방향 간의 각도 차이 계산
+        # 현재 방향과의 차이
         angle_diff = target_angle - self.current_position_yaw
-        # 각도 정규화 (-π ~ π)
+        # -pi ~ pi로 정규화
         angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
 
-        # 목표에 가까워질수록 더 낮은 각속도 계수 사용
+        # 목표에 가까울수록 각속도 이득을 낮춘다
 
-        # 거리가 가까워질수록 더 세밀한 제어
-        angular_gain = min(1.5, max(0.7, distance / 3.0))  # 거리에 따른 가변 게인
+        angular_gain = min(1.5, max(0.7, distance / 3.0))  # 거리에 따른 가변 이득
 
-        # 각속도 제어 - 거리에 따른 보정
+        # 각속도 제어
         target_angular_velocity = np.clip(
-            angular_gain * angle_diff,  # 거리 기반 가변 계수
+            angular_gain * angle_diff,  # 거리 기반 계수
             -self.max_yaw_rate,
             self.max_yaw_rate
         )
 
-        # 각속도 변화율 제한 - 부드러운 회전을 위해 조정
+        # 각가속도 제한. 회전을 부드럽게 한다
         angular_accel = min(1.0, max(0.5, distance / 5.0))  # 거리에 따른 가변 가속도
         angular_vel_diff = target_angular_velocity - self.current_position_ang_vel
         angular_vel_diff = np.clip(
             angular_vel_diff, -angular_accel * self.dt, angular_accel * self.dt)
         angular_velocity = self.current_position_ang_vel + angular_vel_diff
 
-        # 선속도 제어 - 목표지점 근처에서 감속
+        # 선속도 제어
         base_velocity = self.max_speed
 
-        # 거리 기반 속도 변화 제거 - 일정한 속도 유지
-        distance_factor = 1.0  # 항상 최대 속도 유지
+        # 거리에 따른 감속은 두지 않고 속도를 일정하게 유지한다
+        distance_factor = 1.0  # 항상 최대 속도
 
-        # 각도 차이에 따른 약간의 속도 조절만 유지 (안정성을 위해)
+        # 안정성을 위해 각도 오차에 따른 감속만 남긴다
         angle_factor = 1.0 - (abs(angle_diff) / math.pi) * \
-            0.3  # 각도 차이에 따른 약간의 감속
-        angle_factor = max(0.7, angle_factor)  # 최소 70%
+            0.3  # 각도 오차에 따른 감속
+        angle_factor = max(0.7, angle_factor)  # 최소 70 %
 
-        # 회전 시 약간의 속도 감소 - 안정성을 위해 최소한만 유지
+        # 회전 중에는 최소한만 감속한다
         angular_factor = 1.0 - (abs(angular_velocity) /
                                 self.max_yaw_rate) * 0.2  # 최소한의 감속
-        angular_factor = max(0.8, angular_factor)  # 최소 80%
+        angular_factor = max(0.8, angular_factor)  # 최소 80 %
 
-        # 최종 목표 속도 계산 - 일정한 속도 유지
+        # 목표 선속도
         target_velocity = base_velocity * angular_factor * distance_factor * angle_factor
 
-        # 가속도 제한 - 더 빠른 가속 허용
+        # 가속도 제한
         max_accel = min(1.0, self.objConfiguration.getConfiguration(
-            'max_accel') or 1.0)  # 가속도 감소 (1.2 -> 1.0)
+            'max_accel') or 1.0)
         velocity_diff = target_velocity - self.current_position_lin_vel
         acceleration = np.clip(velocity_diff / self.dt, -max_accel, max_accel)
 
-        # 필터링된 가속도 계산 - 반응성 증가
-        alpha = 0.8  # 필터링 계수 증가 (0.7 -> 0.8)
+        # 가속도를 1차 필터로 완만하게 만든다
+        alpha = 0.8
         filtered_accel = acceleration * alpha + \
             (1 - alpha) * self.last_acceleration
         self.last_acceleration = filtered_accel
 
-        # 선속도 업데이트 - 일정한 최소 속도 유지
-        min_speed = self.min_speed  # 설정값 사용하여 일정한 최소 속도 유지
+        # 선속도 갱신. 최소 속도는 유지한다
+        min_speed = self.min_speed  # 최소 속도는 설정값을 쓴다
 
-        # 후진 모드: 선속도 음수 허용, 목표를 뒤쪽으로 향하게 함
+        # 후진 모드에서는 선속도가 음수가 될 수 있다
         if backward:
-            # 목표 각도 반전: 현재 yaw 반대 방향으로 고정된 짧은 목표를 LocalPlanner가 보내줌
-            base_velocity = -min(self.max_speed * 0.5, 0.8)  # 후진은 제한
+            # 후진 목표는 Local_Planner가 현재 yaw 반대편의 짧은 목표로 보내 준다
+            base_velocity = -min(self.max_speed * 0.5, 0.8)  # 후진 속도는 제한한다
             min_back = -min_speed
             linear_velocity = np.clip(
                 self.current_position_lin_vel + (-abs(filtered_accel)) * self.dt, -self.max_speed, -min_speed)
@@ -415,16 +410,16 @@ class Maneuver(DEVSAtomicModel):
             linear_velocity = np.clip(
                 self.current_position_lin_vel + filtered_accel * self.dt, min_speed, self.max_speed)
 
-        # 방향 업데이트
+        # 방향 적분
         new_yaw = self.current_position_yaw + angular_velocity * self.dt
 
-        # 위치 업데이트
+        # 위치 적분
         new_x = self.current_position_x + \
             linear_velocity * math.cos(new_yaw) * self.dt
         new_y = self.current_position_y + \
             linear_velocity * math.sin(new_yaw) * self.dt
 
-        # 상태 업데이트
+        # 상태 반영
         self.current_position_yaw = new_yaw
         self.current_position_x = new_x
         self.current_position_y = new_y
@@ -436,11 +431,10 @@ class Maneuver(DEVSAtomicModel):
         #     print(f"[{self.getTime()}][Maneuver-Debug] Velocity: {linear_velocity:.2f}, Angular velocity: {angular_velocity:.2f}")
 
     def funcSelect(self):
-        """ 선택 함수 """
+        """선택 함수."""
         pass
 
     def external_transition(self, strPort, objEvent):
-        """Maneuver 클래스 내부에서 사용하기 위한 외부 전이 처리 메서드"""
-        # 실제 DEVS 함수인 funcExternalTransition을 호출
+        """클래스 내부에서 외부 전이를 직접 부르기 위한 헬퍼."""
         self.funcExternalTransition(strPort, objEvent)
         return

@@ -21,7 +21,7 @@ class Planner_AMR(DEVSCoupledModel):
         # Input Ports
         self.addInputPort("Task_I")  # FleetManagement로부터 작업 지시
         self.addInputPort("amrCommand")  # FleetManagement로부터 AMR 명령
-        # FleetManagement로부터 단순 이동 명령 (jobID 없음)
+        # 단순 이동 명령 (jobID 없음)
         self.addInputPort("amrGoCommand")
         self.addInputPort("MyManeuverState_I")
         self.addInputPort("OtherManeuverState_I")
@@ -64,7 +64,7 @@ class Planner_AMR(DEVSCoupledModel):
             lpp, "RequestManeuver_O", "RequestManeuver_O")
         self.addExternalOutputCoupling(
             lpp, "EmergencyBackup_O", "EmergencyBackup_O")
-        # 도킹 명령/완료 신호 외부로 노출 (필요시 상위에서 Maneuver와 연결)
+        # 도킹 명령과 완료 신호를 상위 모델로 노출
         self.addExternalOutputCoupling(lpp, "Docking_O", "Docking_O")
         self.addExternalOutputCoupling(
             lpp, "EquipmentDocking", "EquipmentDocking")
@@ -73,11 +73,11 @@ class Planner_AMR(DEVSCoupledModel):
         self.addExternalOutputCoupling(
             lpp, "UndockingComplete_O", "UndockingComplete_O")
         # Internal Coupling
-        # GlobalPlanner → LocalPlanner (경로 전달)
+        # GlobalPlanner -> LocalPlanner (전역 경로)
         self.addInternalCoupling(
             gpp, "GlobalWaypoint_O", lpp, "GlobalWaypoint_I")
 
-        # LocalPlanner → GlobalPlanner (재계획 요청)
+        # LocalPlanner -> GlobalPlanner (재계획 요청)
         self.addInternalCoupling(lpp, "Replan", gpp, "Replan")
         self.addInternalCoupling(lpp, "Docking_O", gpp, "Docking_I")
         self.addInternalCoupling(

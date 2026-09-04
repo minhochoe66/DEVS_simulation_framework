@@ -20,18 +20,17 @@ class Scheduler(DEVSAtomicModel):
         self.addInputPort("fleetInfo")    # FleetManagement로부터 AMR 정보
 
         # Output Ports
-        self.addOutputPort("jobAssign")   # 작업 배정 (외부용)
-        self.addOutputPort("taskAssign")  # FleetManagement에게 작업 할당 정보 전달
+        self.addOutputPort("jobAssign")   # 작업 배정 (외부 출력)
+        self.addOutputPort("taskAssign")  # FleetManagement로 보내는 작업 할당
 
         # Variables
-        self.lstCompleteJob = []  # 완료된 작업 리스트 (다음 공정 대기)
-        self.amrPositions = {}    # FleetManagement로부터 받은 AMR 위치 정보
+        self.lstCompleteJob = []  # 다음 공정을 기다리는 완료 작업
+        self.amrPositions = {}    # FleetManagement가 보낸 AMR 위치
 
-        # TransportCommand 관리자
+        # 운반 명령 관리자
         self.commandManager = TransportCommandManager(globalVar)
         self.count = 0
 
-        # numStages 설정 가져오기
         self.numStages = globalVar.objConfiguration.getConfiguration(
             "numStages") if globalVar.objConfiguration else 3
 
@@ -44,7 +43,7 @@ class Scheduler(DEVSAtomicModel):
             jobInfo = self.globalVar.getTargetJobsByID(jobID)
             equipmentInfo = self.globalVar.getEquipmentInfoByID(equipmentID)
 
-            # 다음 공정 설정
+            # 다음 공정 결정
             self.setNextProcess(jobInfo)
             self.lstCompleteJob.append(jobID)
 
@@ -64,7 +63,7 @@ class Scheduler(DEVSAtomicModel):
             equipmentID = objEvent
             equipmentInfo = self.globalVar.getEquipmentInfoByID(equipmentID)
 
-            # SOURCE 장비는 무시 (Data_generator가 관리)
+            # SOURCE는 Data_generator가 관리하므로 무시한다
             if equipmentInfo.strType != "SOURCE":
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Scheduler] Equipment {equipmentID} is FREE"
@@ -82,24 +81,23 @@ class Scheduler(DEVSAtomicModel):
                         self.state = self.stateList[1]  # COMMAND
 
         elif strPort == "fleetInfo":
-            # FleetManagement로부터 AMR 정보 수신
             self.amrPositions = objEvent  # objEvent는 dictionary
 
             self.globalVar.printTerminal(
                 f"[{self.getTime()}][Scheduler] Received fleet info with {len(self.amrPositions)} AMRs"
             )
 
-            # AMR 상태 업데이트 시 항상 작업 할당 시도
-            # lstCompleteJob에 대기 중인 작업이 있으면 재할당 시도
+            # AMR 상태가 바뀔 때마다 할당을 시도한다
+            # 대기 중인 완료 작업이 있으면 다시 배정한다
             if self.lstCompleteJob:
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Scheduler] Re-attempting assignment for {len(self.lstCompleteJob)} queued jobs"
                 )
 
-            # WAIT 상태일 때만 COMMAND로 전환
+            # WAIT일 때만 COMMAND로 전이한다
             if self.state == "WAIT":
                 self.state = self.stateList[1]  # COMMAND
-            # 이미 COMMAND 상태면 현재 처리 완료 후 다시 검사됨
+            # 이미 COMMAND면 현재 처리가 끝난 뒤 다시 검사된다
 
             return True
 
@@ -112,7 +110,7 @@ class Scheduler(DEVSAtomicModel):
 
     def funcOutput(self):
         if self.state == "COMMAND":
-            # 작업 배정 조건 체크 (AMR 포함)
+            # 작업, 장비, AMR을 매칭한다
             transportCommand = self.checkCommandCondition()
 
             if transportCommand is not None:
@@ -120,7 +118,7 @@ class Scheduler(DEVSAtomicModel):
                     f"[{self.getTime()}][Scheduler] ✅ {transportCommand}"
                 )
 
-                # FleetManagement에게 TransportCommand 전달
+                # 운반 명령을 FleetManagement로 보낸다
                 self.addOutputEvent("taskAssign", transportCommand)
 
                 self.globalVar.printTerminal(
@@ -156,38 +154,37 @@ class Scheduler(DEVSAtomicModel):
             return 0
 
     def setNextProcess(self, jobInfo):
-        """다음 공정 스테이지 설정 (numStages에 따라 동적 흐름)"""
+        """numStages에 맞추어 다음 공정 스테이지를 정한다."""
         currentProcess = jobInfo.strCurrentProcess
 
-        # numStages에 따른 동적 공정 흐름
-        # numStages=1: SOURCE → STAGE_B → SINK
-        # numStages=2: SOURCE → STAGE_B → STAGE_C → SINK
-        # numStages=3: SOURCE → STAGE_B → STAGE_C → STAGE_D → SINK
+        # numStages=1: SOURCE -> STAGE_B -> SINK
+        # numStages=2: SOURCE -> STAGE_B -> STAGE_C -> SINK
+        # numStages=3: SOURCE -> STAGE_B -> STAGE_C -> STAGE_D -> SINK
 
         if currentProcess == "SOURCE":
-            # A 완료 → 항상 B로
+            # A 다음은 항상 B
             jobInfo.setNextProcess("STAGE_B", None)
 
         elif currentProcess and currentProcess.startswith("PROCESS_B"):
-            # B 완료 → numStages에 따라 분기
+            # B 다음은 numStages에 따라 갈린다
             if self.numStages == 1:
                 jobInfo.setNextProcess("SINK", None)
             else:
                 jobInfo.setNextProcess("STAGE_C", None)
 
         elif currentProcess and currentProcess.startswith("PROCESS_C"):
-            # C 완료 → numStages에 따라 분기
+            # C 다음도 numStages에 따라 갈린다
             if self.numStages == 2:
                 jobInfo.setNextProcess("SINK", None)
             else:
                 jobInfo.setNextProcess("STAGE_D", None)
 
         elif currentProcess and currentProcess.startswith("PROCESS_D"):
-            # D 완료 → SINK
+            # D 다음은 SINK
             jobInfo.setNextProcess("SINK", None)
 
         else:
-            # SINK 또는 알 수 없는 상태
+            # SINK이거나 알 수 없는 공정
             jobInfo.setNextProcess(None, None)
 
         self.globalVar.printTerminal(
@@ -195,40 +192,40 @@ class Scheduler(DEVSAtomicModel):
         )
 
     def checkCommandCondition(self):
-        """작업과 장비 매칭 + AMR 할당 + TransportCommand 생성"""
+        """대기 작업을 빈 장비와 유휴 AMR에 매칭하고 운반 명령을 만든다."""
         equipmentInfo = self.globalVar.getEquipmentInfo()
         vehicleInfo = self.globalVar.getVehicleInfo()
 
-        # 1. 완료된 작업 중 배정 가능한 것 찾기 (높은 우선순위)
-        for jobID in self.lstCompleteJob[:]:  # 복사본으로 순회
+        # 1. 이미 완료되어 다음 공정을 기다리는 작업을 먼저 배정한다
+        for jobID in self.lstCompleteJob[:]:  # 순회 중 원본이 바뀌므로 복사본을 쓴다
             jobInfo = self.globalVar.getTargetJobsByID(jobID)
 
-            # 현재 작업이 있는 장비 찾기 (fromEquipment)
+            # 작업이 놓여 있는 장비가 픽업 위치가 된다
             fromEquipmentID = jobInfo.strCurrentProcessEqpID
             if fromEquipmentID is None:
                 continue
             fromEquipment = self.globalVar.getEquipmentInfoByID(
                 fromEquipmentID)
 
-            # 다음 공정 장비 중 EMPTY인 것 찾기 (toEquipment)
+            # 다음 공정 장비 중 EMPTY인 것이 목적지가 된다
             for equipmentID, equipmentValue in equipmentInfo.items():
-                # 플렉서블 플로우샵: nextProcess가 STAGE_X 형식이면 스테이지로 매칭
+                # 유연 흐름 공정: nextProcess가 STAGE_X면 같은 스테이지의 아무 장비나 쓸 수 있다
                 if jobInfo.strNextProcess and jobInfo.strNextProcess.startswith("STAGE_"):
                     type_match = (equipmentValue.strStageID ==
                                   jobInfo.strNextProcess)
                 else:
-                    # SOURCE, SINK 등은 정확히 매칭
+                    # SOURCE와 SINK는 정확히 일치해야 한다
                     type_match = (equipmentValue.strType ==
                                   jobInfo.strNextProcess)
 
                 if (type_match and equipmentValue.strState == "EMPTY"):
 
-                    # IDLE 상태인 AMR 찾기 (fromEquipment와 가장 가까운 AMR)
+                    # 픽업 위치에 가장 가까운 유휴 AMR을 고른다
                     selectedAMR = self.findAvailableAMR(
                         fromEquipment, vehicleInfo)
 
                     if selectedAMR is not None:
-                        # TransportCommand 생성
+                        # 운반 명령 생성
                         transportCommand = self.commandManager.createCommand(
                             jobID, fromEquipment, equipmentValue
                         )
@@ -243,7 +240,7 @@ class Scheduler(DEVSAtomicModel):
                         self.lstCompleteJob.remove(jobID)
                         equipmentValue.setEquipmentState("RESERVED")
 
-                        # AMR 상태 업데이트
+                        # AMR 상태 갱신
                         vehicleInfo[selectedAMR].setState("RESERVED")
                         vehicleInfo[selectedAMR].setJobID(jobID)
 
@@ -260,31 +257,31 @@ class Scheduler(DEVSAtomicModel):
                             f"[{self.getTime()}][Scheduler] No available AMR for Job #{jobID} → Equipment {equipmentID}"
                         )
 
-        # 2. DONE 상태 장비의 작업 처리 (낮은 우선순위)
+        # 2. 그 다음으로 DONE 상태 장비의 작업을 처리한다
         for equipmentID, equipmentValue in equipmentInfo.items():
             if equipmentValue.strState == "DONE" and equipmentValue.intProcessingJobID:
                 jobID = equipmentValue.intProcessingJobID
                 jobInfo = self.globalVar.getTargetJobsByID(jobID)
 
-                # 다음 공정 장비 중 EMPTY인 것 찾기 (toEquipment)
+                # 다음 공정 장비 중 EMPTY인 것이 목적지가 된다
                 for nextEquipmentID, nextEquipmentValue in equipmentInfo.items():
-                    # 플렉서블 플로우샵: nextProcess가 STAGE_X 형식이면 스테이지로 매칭
+                    # 유연 흐름 공정: nextProcess가 STAGE_X면 같은 스테이지의 아무 장비나 쓸 수 있다
                     if jobInfo.strNextProcess and jobInfo.strNextProcess.startswith("STAGE_"):
                         type_match = (
                             nextEquipmentValue.strStageID == jobInfo.strNextProcess)
                     else:
-                        # SOURCE, SINK 등은 정확히 매칭
+                        # SOURCE와 SINK는 정확히 일치해야 한다
                         type_match = (nextEquipmentValue.strType ==
                                       jobInfo.strNextProcess)
 
                     if (type_match and nextEquipmentValue.strState == "EMPTY"):
 
-                        # IDLE 상태인 AMR 찾기 (equipmentValue=fromEquipment와 가장 가까운 AMR)
+                        # 픽업 위치에 가장 가까운 유휴 AMR을 고른다
                         selectedAMR = self.findAvailableAMR(
                             equipmentValue, vehicleInfo)
 
                         if selectedAMR is not None:
-                            # TransportCommand 생성
+                            # 운반 명령 생성
                             transportCommand = self.commandManager.createCommand(
                                 jobID, equipmentValue, nextEquipmentValue
                             )
@@ -299,7 +296,7 @@ class Scheduler(DEVSAtomicModel):
                                 nextEquipmentValue.strType, nextEquipmentID)
                             nextEquipmentValue.setEquipmentState("RESERVED")
 
-                            # AMR 상태 업데이트
+                            # AMR 상태 갱신
                             vehicleInfo[selectedAMR].setState("RESERVED")
                             vehicleInfo[selectedAMR].setJobID(jobID)
 
@@ -319,15 +316,13 @@ class Scheduler(DEVSAtomicModel):
         return None
 
     def findAvailableAMR(self, targetEquipment, vehicleInfo):
-        """IDLE 상태이고 출발지(fromEquipment)와 가장 가까운 AMR 선택
+        """픽업 위치에 가장 가까운 유휴 AMR을 고른다.
 
-        Args:
-            targetEquipment: fromEquipment (출발지 장비) - AMR이 먼저 가야 할 곳
-            vehicleInfo: AMR 정보 딕셔너리
+        targetEquipment는 AMR이 먼저 가야 할 출발지 장비다.
         """
         import math
 
-        # 출발지 장비의 입력 포트 위치 (AMR이 픽업하러 가야 할 곳)
+        # 출발지 장비의 입력 포트가 픽업 지점이다
         if targetEquipment.inputPort:
             targetPos = targetEquipment.inputPort['position']
         else:
@@ -339,10 +334,8 @@ class Scheduler(DEVSAtomicModel):
         minDistance = float('inf')
         selectedAMR = None
 
-        # IDLE 상태인 AMR 찾기
         for amrID, amrValue in vehicleInfo.items():
             if amrValue.strState == "IDLE" and hasattr(amrValue, 'lstCoordinates'):
-                # AMR과 장비 사이의 거리 계산
                 amrX, amrY = amrValue.lstCoordinates
                 distance = math.sqrt((targetX - amrX)**2 + (targetY - amrY)**2)
 

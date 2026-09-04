@@ -12,7 +12,6 @@ class ExperimentalFrame(DEVSCoupledModel):
         self.scenario_label = scenario_label
 
         data_generator = Data_generator("data_generator", self.globalVar)
-        # Data_collector에 globalVar, iteration_num, scenario_label 전달
         self.data_collector = Data_collector(
             "data_collector",
             objConfiguration=self.globalVar.objConfiguration,
@@ -37,5 +36,5 @@ class ExperimentalFrame(DEVSCoupledModel):
             "Complete_I", self.data_collector, "Complete_I")
 
     def get_data_collector(self):
-        """몬테카를로 분석을 위한 Data_collector 접근"""
+        """몬테카를로 분석이 사용하는 Data_collector를 반환한다."""
         return self.data_collector

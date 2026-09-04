@@ -32,33 +32,21 @@ class AMRSimModel(DEVSCoupledModel):
             objConfiguration=objConfiguration
         )
 
-        # Models (iteration_num, scenario_label 전달)
+        # 하위 모델 구성
         self.EF = ExperimentalFrame(
             "EF", self.globalVar, iteration_num=iteration_num, scenario_label=scenario_label)
         SM = SimulationModel("SM", self.globalVar)
         self.addModel(self.EF)
         self.addModel(SM)
 
-        # Internal Coupling: EF의 job 출력 → SM의 job 입력
+        # EF의 job 출력을 SM의 job 입력으로 연결
         self.addInternalCoupling(self.EF, "job", SM, "job")
         self.addInternalCoupling(
             SM, "MyManeuverState_O", self.EF, "MyManeuverState_I")
 
         self.addInternalCoupling(SM, "Complete_O", self.EF, "Complete_I")
-        # Input Ports
-        # Output Ports
-
-        # External Input Coupling
-
-        # External Output Coupling
-
-        # Internal Coupling
-
-        # Variables
 
     def get_iteration_results(self):
-        """
-        몬테카를로 시뮬레이션을 위한 현재 반복 결과 반환
-        """
+        """이번 반복의 성능 지표를 반환한다."""
         data_collector = self.EF.get_data_collector()
         return data_collector.get_iteration_results()

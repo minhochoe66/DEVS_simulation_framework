@@ -8,8 +8,6 @@ class AMR(DEVSCoupledModel):
     def __init__(self, ID, objConfiguration, globalVar, algorithm):
         super().__init__(ID)
 
-        # 입력 및 출력 포트 설정
-        # GPP의 Done 메시지를 Agent의 Done_OUT으로 전달
         self.objConfiguration = objConfiguration
         self.globalVar = globalVar
         self.vehicleID = ID
@@ -26,7 +24,7 @@ class AMR(DEVSCoupledModel):
 
         # Input Ports
         self.addInputPort("amrCommand")  # FleetManagement로부터 작업 지시
-        self.addInputPort("amrGoCommand")  # FleetManagement로부터 작업 지시
+        self.addInputPort("amrGoCommand")  # 단순 이동 명령 (job 없음)
         self.addInputPort("OtherManeuverState_I")
         self.addInputPort("jobExchange_I")  # Equipment로부터 작업 교환 완료 신호
 

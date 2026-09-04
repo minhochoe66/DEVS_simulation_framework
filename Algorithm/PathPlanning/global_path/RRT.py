@@ -6,7 +6,7 @@ from shapely.geometry import Point, LineString, Polygon
 
 
 def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_rate=5):
-    # 입력값 타입 검증 및 변환
+    # 입력 타입 검증 및 변환
     if not isinstance(start, tuple):
         if isinstance(start, (list, np.ndarray)):
             start = tuple(start)
@@ -24,7 +24,7 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
 
     class Node:
         def __init__(self, point, parent=None):
-            # point를 tuple로 보장하고 검증
+            # point를 tuple로 정규화한다
             try:
                 if isinstance(point, tuple):
                     self.point = point
@@ -38,7 +38,7 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
                             f"[RRT] Warning: Point has less than 2 dimensions: {point}")
                         self.point = point
                 else:
-                    # 다른 타입이면 시도해보기
+                    # 그 밖의 타입은 변환을 시도한다
                     try:
                         point_array = np.array(point).flatten()
                         if len(point_array) >= 2:
@@ -63,14 +63,12 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
 
     def nearest_node(nodes, random_point):
         try:
-            # 먼저 유효한 노드만 필터링
+            # 유효한 노드만 남긴다
             valid_nodes = []
             for node in nodes:
                 if hasattr(node, 'point') and node.point is not None:
-                    # point가 tuple 또는 list인지 확인
                     if isinstance(node.point, (tuple, list, np.ndarray)):
                         try:
-                            # 2D 좌표인지 확인
                             point_array = np.array(node.point)
                             if point_array.shape == (2,):
                                 valid_nodes.append(node)
@@ -84,7 +82,7 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
                         print(
                             f"[RRT] Skipping node with invalid point type: {type(node.point)}")
                 elif isinstance(node, tuple):
-                    # tuple인 경우 Node 객체로 변환
+                    # tuple은 Node로 변환한다
                     valid_nodes.append(Node(node))
                 else:
                     print(f"[RRT] Skipping invalid node type: {type(node)}")
@@ -93,13 +91,12 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
                 print(f"[RRT] Error: No valid nodes found!")
                 return nodes[0] if nodes else None
 
-            # 필터링된 노드로 계산
             points = np.array([node.point for node in valid_nodes])
             random_point = np.array(random_point)
             distances = np.linalg.norm(points - random_point, axis=1)
             return valid_nodes[np.argmin(distances)]
         except Exception as e:
-            # 모든 예외 처리
+            # 어떤 예외에도 트리 확장을 멈추지 않는다
             print(f"[RRT] Error in nearest_node: {e}")
             print(f"[RRT] Number of nodes: {len(nodes)}")
             if nodes:
@@ -107,7 +104,7 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
                 if hasattr(nodes[0], 'point'):
                     print(
                         f"[RRT] First node.point: {nodes[0].point}, type: {type(nodes[0].point)}")
-            # 최소한 첫 번째 노드 반환
+            # 최소한 첫 노드는 반환한다
             return nodes[0] if nodes else None
 
     def steer(from_node, to_point, step_size):
@@ -182,13 +179,13 @@ def RRT(start, goal, terrain_polygons, max_iter=5000, step_size=1, goal_sample_r
             new_node = Node(new_point, nearest)
             nodes.append(new_node)
 
-            # Check if we can connect directly to the goal (증가된 범위)
+            # 목표에 바로 연결되는지 확인한다 (허용 범위를 넓게 둠)
             if distance(new_point, goal) <= step_size * 3:
                 if line_collision_free(new_point, goal, polygons):
                     final_node = Node(goal, new_node)
                     return reconstruct_path(final_node)
 
-        # 더 자주 조기 종료 체크 (50 iter마다, 더 많은 노드 검사)
+        # 50회마다 조기 종료를 검사한다
         if i % 50 == 0 and len(nodes) > 30:
             # Check if any node is close to goal
             check_count = min(30, len(nodes))  # 최근 30개 노드 검사

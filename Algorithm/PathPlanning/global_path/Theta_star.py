@@ -60,7 +60,7 @@ def plan(
     start_node = (s_ix, s_iy)
     goal_node = (g_ix, g_iy)
 
-    # 시작/목표가 장애물 내부인 경우 경로 없음
+    # 시작점이나 목표점이 장애물 안이면 경로가 없다
     if not cell_is_free(*start_node) or not cell_is_free(*goal_node):
         return []
 
@@ -82,11 +82,11 @@ def plan(
         for v in neighbors(*u):
             if v in closed:
                 continue
-            # 이웃 셀 자체가 장애물 내부면 스킵
+            # 이웃 셀이 장애물 안이면 건너뛴다
             if not cell_is_free(*v):
                 continue
 
-            # Theta*: 부모에서 직시 가능하면 부모를 통해 완화
+            # Theta*: 부모에서 직시 가능하면 부모를 거쳐 완화한다
             if parent[u] != u and line_free_cells(parent[u], v):
                 # path from parent[u] to v
                 cand_g = g[parent[u]] + euclidean(to_world(*parent[u]), to_world(*v))
@@ -96,7 +96,7 @@ def plan(
                     f[v] = g[v] + euclidean(to_world(*v), to_world(*goal_node))
                     heapq.heappush(open_pq, (f[v], v))
             else:
-                # 부모에서 직시 불가능하면 u->v 간 선분 충돌도 확인
+                # 직시가 안 되면 u->v 선분의 충돌도 확인한다
                 if not line_free_cells(u, v):
                     continue
                 cand_g = g[u] + euclidean(to_world(*u), to_world(*v))

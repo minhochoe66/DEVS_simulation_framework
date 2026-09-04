@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Rectangle
 
-# Windows 콘솔 한글/UTF-8 출력 대응
+# Windows 콘솔에서 UTF-8 출력이 되도록 맞춘다
 if sys.platform == 'win32':
     try:
         import io
@@ -20,7 +20,7 @@ if sys.platform == 'win32':
     except Exception:
         pass
 
-# Tk 인터랙티브 보기 (headless 저장만 할 경우 아래 줄을 주석 처리하고 Agg 사용 가능)
+# Tk 대화형 백엔드. 화면 없이 저장만 하려면 이 줄을 지우고 Agg를 쓴다
 matplotlib.use('TkAgg')
 
 
@@ -31,14 +31,14 @@ def find_latest_timestamp_folder(base_dir: str) -> str:
                if os.path.isdir(os.path.join(base_dir, d))]
     if not entries:
         return ''
-    # 사전순이 아닌 생성시간 기준 최신 폴더 선택
+    # 이름순이 아니라 생성 시각 기준으로 최신 폴더를 고른다
     entries = sorted(entries, key=lambda d: os.path.getmtime(
         os.path.join(base_dir, d)))
     return entries[-1]
 
 
 def load_map_json(map_path: str = 'JSON/map.json') -> dict:
-    """map.json 파일을 읽어서 장비 정보 및 대기 구역 정보 반환"""
+    """map.json에서 장비와 대기 구역 정보를 읽는다."""
     if not os.path.exists(map_path):
         print(f'⚠️  Map file not found: {map_path}')
         return None
@@ -56,7 +56,7 @@ def load_map_json(map_path: str = 'JSON/map.json') -> dict:
 
 
 def load_agent_csvs(agent_dir: str) -> dict:
-    """Agent 폴더에서 차량 CSV들을 읽어 dict 반환: { vehicle_name: DataFrame }"""
+    """Agent 폴더의 차량 CSV를 읽어 {vehicle_name: DataFrame}으로 반환한다."""
     data = {}
     if not agent_dir or not os.path.exists(agent_dir):
         return data
@@ -65,9 +65,9 @@ def load_agent_csvs(agent_dir: str) -> dict:
             fpath = os.path.join(agent_dir, fname)
             try:
                 df = pd.read_csv(fpath)
-                # 최소 컬럼 확인
+                # 필수 컬럼 확인
                 if {'x', 'y'}.issubset(df.columns):
-                    # 시간열 생성 (샘플 간격 0.1s 가정)
+                    # 시간축을 만든다. 샘플 간격은 0.1 s로 가정한다
                     if 'timestamp' not in df.columns:
                         df['timestamp'] = np.arange(len(df)) * 0.1
                     data[fname.replace('.csv', '')] = df
@@ -85,7 +85,7 @@ def create_rectangle_points(x, y, length=1.0, width=1.0, yaw=0.0):
 
 
 def draw_equipment(ax, map_data):
-    """맵의 장비들을 배경에 그리기"""
+    """장비를 배경에 그린다."""
     if not map_data:
         return
 
@@ -94,7 +94,7 @@ def draw_equipment(ax, map_data):
         eq_id = eq.get('equipmentID', '')
         process_type = eq.get('processType', '')
 
-        # INPUT 포트
+        # 입력 포트
         if 'inputPort' in eq and eq['inputPort']:
             inp = eq['inputPort']
             pos = inp.get('position', {})
@@ -108,7 +108,7 @@ def draw_equipment(ax, map_data):
             ax.text(x, y, 'IN', ha='center', va='center',
                     fontsize=7, color='green', weight='bold')
 
-        # WORK 포지션
+        # 작업 위치
         if 'workPosition' in eq and eq['workPosition']:
             work = eq['workPosition']
             pos = work.get('position', {})
@@ -122,7 +122,7 @@ def draw_equipment(ax, map_data):
             ax.text(x, y - h/2 - 1.5, eq_id, ha='center', va='top',
                     fontsize=8, color='black', weight='bold')
 
-        # OUTPUT 포트
+        # 출력 포트
         if 'outputPort' in eq and eq['outputPort']:
             out = eq['outputPort']
             pos = out.get('position', {})
@@ -138,7 +138,7 @@ def draw_equipment(ax, map_data):
 
 
 def draw_waiting_areas(ax, map_data):
-    """맵의 대기 구역들을 배경에 그리기"""
+    """대기 구역을 배경에 그린다."""
     if not map_data:
         return
 
@@ -151,14 +151,14 @@ def draw_waiting_areas(ax, map_data):
         x, y = pos.get('x', 0), pos.get('y', 0)
         w, h = bbox.get('width', 5), bbox.get('height', 5)
 
-        # 대기 구역은 보라색 점선 테두리로 표시
+        # 대기 구역은 보라색 점선으로 표시한다
         rect = Rectangle((x - w/2, y - h/2), w, h,
                          facecolor='#E6E6FA', edgecolor='#9370DB',
                          alpha=0.3, linewidth=2, linestyle='--',
                          label='Waiting Area' if area_id == waiting_areas[0]['areaID'] else '')
         ax.add_patch(rect)
 
-        # 'W' 표시 및 Area ID
+        # 'W' 표시와 구역 ID
         ax.text(x, y, 'W', ha='center', va='center',
                 fontsize=8, color='purple', weight='bold')
         ax.text(x, y + h/2 + 1.0, area_id, ha='center', va='bottom',
@@ -170,7 +170,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
         print('No agent CSV files found.')
         return
 
-    # 전역 시간축 구성: 모든 에이전트의 timestamp를 합쳐 정렬 후 샘플링
+    # 모든 차량의 timestamp를 합쳐 정렬하고 샘플링하여 전역 시간축을 만든다
     all_times = []
     for df in agents.values():
         all_times.extend(df['timestamp'].tolist())
@@ -178,7 +178,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
         print('No timestamps in CSVs.')
         return
     times = np.array(sorted(set(all_times)))
-    # 프레임 수 제한 (최대 1000 프레임)
+    # 프레임은 1000개로 제한한다
     if len(times) > 1000:
         idx = np.linspace(0, len(times)-1, 1000).astype(int)
         times = times[idx]
@@ -191,7 +191,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
     ax.set_ylabel('Y Position (m)')
     ax.set_title(title or 'AMR Trajectory with Map')
 
-    # 맵 기반 경계 계산
+    # 맵에서 표시 범위를 계산한다
     xmin, xmax, ymin, ymax = 0.0, 300.0, 0.0, 100.0
     if map_data:
         equipment_info = map_data.get('equipmentInfo', [])
@@ -207,7 +207,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
                     ymin = min(ymin, y - h/2)
                     ymax = max(ymax, y + h/2)
 
-        # WaitingArea도 경계 계산에 포함
+        # 대기 구역도 범위에 넣는다
         waiting_areas = map_data.get('WatingareaInfo', [])
         for area in waiting_areas:
             pos = area.get('position', {})
@@ -219,7 +219,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
             ymin = min(ymin, y - h/2)
             ymax = max(ymax, y + h/2)
 
-    # 차량 경로도 경계에 반영
+    # 차량 궤적도 범위에 넣는다
     for df in agents.values():
         xmin = min(xmin, float(np.nanmin(df['x'])))
         xmax = max(xmax, float(np.nanmax(df['x'])))
@@ -230,13 +230,13 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
     ax.set_xlim(xmin - margin, xmax + margin)
     ax.set_ylim(ymin - margin, ymax + margin)
 
-    # 장비 그리기 (배경)
+    # 장비 (배경)
     draw_equipment(ax, map_data)
 
-    # 대기 구역 그리기 (배경)
+    # 대기 구역 (배경)
     draw_waiting_areas(ax, map_data)
 
-    # 각 에이전트별로 궤적 라인과 현재 위치 사각형 초기화
+    # 차량마다 궤적 선과 현재 위치 사각형을 만든다
     colors = ['#ff7f0e', '#1f77b4', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
     traj_lines = {}
     rect_patches = {}
@@ -252,13 +252,13 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
                            closed=True, facecolor=c, edgecolor='black', alpha=0.7, linewidth=1.5)
         ax.add_patch(rect)
         rect_patches[name] = rect
-        # 방향 화살표 (초기 None -> 업데이트 시 생성/갱신)
+        # 방향 화살표. 처음에는 None이고 갱신할 때 만든다
         arrows[name] = None
 
     # 범례
     ax.legend(loc='upper right')
 
-    # 프레임 업데이트 함수
+    # 프레임 갱신
     def update(frame_idx):
         t = times[frame_idx]
         ax.set_title(f"AMR Trajectory (t={t:.1f}s)")
@@ -269,7 +269,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
             if df_t.empty:
                 continue
 
-            # 최근 20개만 표시 (꼬리 효과)
+            # 꼬리 효과를 위해 최근 20개만 그린다
             if len(df_t) > 20:
                 df_tail = df_t.tail(20)
             else:
@@ -278,7 +278,7 @@ def animate_agents(agents: dict, map_data: dict = None, title: str = ''):
             traj_lines[name].set_data(df_tail['x'].values, df_tail['y'].values)
             artists.append(traj_lines[name])
 
-            # 현재 상태
+            # 현재 자세
             row = df_t.iloc[-1]
             x = float(row['x'])
             y = float(row['y'])
@@ -310,9 +310,9 @@ def main():
     parser = argparse.ArgumentParser(
         description='Visualize AMR CSV trajectories (no obstacles)')
 
-    # 스크립트 파일 위치 기준으로 Visualizations 폴더 경로 설정
+    # 경로는 이 스크립트 위치를 기준으로 잡는다
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    default_base = script_dir  # visualize.py가 Visualizations/ 안에 있으므로
+    default_base = script_dir  # 이 파일이 Visualizations/ 안에 있다
 
     parser.add_argument('--base', type=str, default=default_base,
                         help='Base directory containing timestamp folders')
@@ -323,7 +323,7 @@ def main():
     base_dir = args.base
     print(f'📂 Base directory: {base_dir}')
 
-    # 폴더명이 지정되지 않으면 자동으로 최신 폴더 선택
+    # 폴더를 지정하지 않으면 최신 폴더를 쓴다
     if args.foldername:
         ts = args.foldername
         print(f'📌 Manually specified folder: {ts}')
@@ -339,7 +339,7 @@ def main():
 
     ts_folder_path = os.path.join(base_dir, ts)
 
-    # Agent 폴더 찾기: iteration_1/Agent 또는 Agent
+    # Agent 폴더는 iteration_1/Agent이거나 Agent다
     agent_dir_iteration = os.path.join(ts_folder_path, 'iteration_1', 'Agent')
     agent_dir_direct = os.path.join(ts_folder_path, 'Agent')
 
@@ -360,14 +360,13 @@ def main():
         print('❌ No vehicle CSV files found!')
         return
 
-    # 맵 데이터 로드 - Agent 폴더와 같은 위치의 map.json 우선 사용
-    # iteration_1/map.json 또는 타임스탬프 폴더/map.json
+    # Agent 폴더와 같은 위치의 map.json을 먼저 쓴다
     if os.path.exists(agent_dir_iteration):
-        # iteration_1 폴더에서 Agent를 찾은 경우
+        # iteration_1 아래에서 Agent를 찾은 경우
         local_map_path = os.path.join(
             ts_folder_path, 'iteration_1', 'map.json')
     else:
-        # 직접 Agent 폴더를 찾은 경우
+        # Agent 폴더를 바로 찾은 경우
         local_map_path = os.path.join(ts_folder_path, 'map.json')
 
     if os.path.exists(local_map_path):
@@ -375,9 +374,8 @@ def main():
         map_data = load_map_json(local_map_path)
     else:
         print(f'⚠️ No local map.json found, using project root map.json')
-        # 맵 데이터 로드 (프로젝트 루트의 JSON/map.json)
+        # 결과 폴더에 map.json이 없으면 프로젝트의 JSON/map.json을 쓴다
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        # Visualizations의 상위 = 프로젝트 루트
         project_root = os.path.dirname(script_dir)
         map_path = os.path.join(project_root, 'JSON', 'map.json')
         map_data = load_map_json(map_path)

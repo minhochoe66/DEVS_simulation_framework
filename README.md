@@ -10,6 +10,10 @@ Reference implementation for the article
 > Min-ho Choi, Jin-hyeon Sung, Im-seok Lee, Kyung-min Seo\*
 > *Manuscript under review, 2026.*
 
+> **You are on the `ko` branch.** It is identical to `main` except that the source-code
+> comments and docstrings are written in Korean. Executable code, configuration and
+> documentation are the same on both branches — see [Branches](#branches).
+
 ---
 
 ## Overview
@@ -289,6 +293,16 @@ To keep the correspondence between article and code honest:
 - The harness for the algorithm-level trigger-event scenarios (§4.3) is not included. This
   repository covers the operation-level experiment driver (`main.py`) and the Monte Carlo
   analysis pipeline.
+
+## Branches
+
+| Branch | Comment language | Purpose |
+|---|---|---|
+| `main` | English | The reference version, and the one cited by the article. |
+| `ko` | Korean | The same framework with Korean comments, for Korean-speaking readers. |
+
+The two branches carry the same executable code: they differ only in the text of comments
+and docstrings, which is verified by comparing the abstract syntax trees.
 
 ## Citation
 
