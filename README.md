@@ -102,7 +102,7 @@ live visualiser. The AMR models in `modeling/` are built entirely on these base 
 │   ├── setup.json                #   replications, fleet size, run modes
 │   ├── map.json                  #   shop-floor layout: equipment, ports, waiting areas
 │   ├── processInfo.json          #   process sequences and machine performance factors
-│   └── vehicleinfo.json          #   robot spawn poses and vehicle/planner parameters
+│   └── vehicleInfo.json          #   robot spawn poses and vehicle/planner parameters
 │
 ├── SimulationEngine/             # DEVS kernel (formalism level, domain independent)
 │   ├── ClassicDEVS/              #   DEVSModel, DEVSAtomicModel, DEVSCoupledModel, DEVSCoupling
@@ -263,7 +263,7 @@ The local layer is instantiated in
 [`Local_Planner.py`](modeling/simulation/PhysicalSystem/atomic/Local_Planner.py#L3)
 from `Algorithm/PathPlanning/Local_path/DWA.py`. `DWAPlanner` receives the shared
 `Configurator`, so all of its gains (`to_goal_cost_gain`, `speed_cost_gain`,
-`obstacle_cost_gain`, `safety_margin`, …) are read from `JSON/vehicleinfo.json` under
+`obstacle_cost_gain`, `safety_margin`, …) are read from `JSON/vehicleInfo.json` under
 `vehicleParam` rather than hard-coded. A replacement local planner only needs to expose the
 same velocity-command contract used there.
 
@@ -289,6 +289,16 @@ To keep the correspondence between article and code honest:
 - The harness for the algorithm-level trigger-event scenarios (§4.3) is not included. This
   repository covers the operation-level experiment driver (`main.py`) and the Monte Carlo
   analysis pipeline.
+
+## Branches
+
+| Branch | Comment language | Purpose |
+|---|---|---|
+| `main` | English | The reference version, and the one cited by the article. |
+| `ko` | Korean | The same framework with Korean comments, for Korean-speaking readers. |
+
+The two branches carry the same executable code: they differ only in the text of comments
+and docstrings, which is verified by comparing the abstract syntax trees.
 
 ## Citation
 

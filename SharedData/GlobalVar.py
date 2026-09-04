@@ -9,11 +9,11 @@ class GlobalVar:
         self.vehicleInfo = {}
         self.targetJobs = {}
         self.performanceInfo = {}
-        self.obstacleInfo = []  # BoundingBox 기반 정적 장애물
-        self.watingAreaInfo = {}  # WaitingArea 정보
+        self.obstacleInfo = []  # static obstacles, from bounding boxes
+        self.watingAreaInfo = {}  # waiting areas
         self.isTerminalOn = isTerminalOn
         self.initVehicleInfo = {}
-        self.objConfiguration = objConfiguration  # Configuration 객체 저장
+        self.objConfiguration = objConfiguration  # the shared Configurator
         self.GlobalPlanner_algorithm_time = 0
         self.LocalPlanner_algorithm_time = 0
         self.GlobalPlanner_call_count = 0
@@ -33,12 +33,12 @@ class GlobalVar:
         return self.LocalPlanner_algorithm_time
 
     def print_algorithm_statistics(self):
-        """알고리즘 실행 시간 통계 출력"""
+        """Print the planner computation-time statistics."""
         print("\n" + "="*70)
         print("📊 ALGORITHM PERFORMANCE STATISTICS")
         print("="*70)
 
-        # Global Planner 통계
+        # Global planner
         global_total = self.GlobalPlanner_algorithm_time
         global_count = self.GlobalPlanner_call_count
         global_avg = global_total / global_count if global_count > 0 else 0
@@ -48,7 +48,7 @@ class GlobalVar:
         print(f"   Call Count:     {global_count}")
         print(f"   Average Time:   {global_avg:.3f} seconds/call")
 
-        # Local Planner 통계
+        # Local planner
         local_total = self.LocalPlanner_algorithm_time
         local_count = self.LocalPlanner_call_count
         local_avg = local_total / local_count if local_count > 0 else 0
@@ -58,7 +58,7 @@ class GlobalVar:
         print(f"   Call Count:     {local_count}")
         print(f"   Average Time:   {local_avg:.4f} seconds/call")
 
-        # 전체 통계
+        # Totals
         total_time = global_total + local_total
         total_count = global_count + local_count
 
@@ -66,7 +66,7 @@ class GlobalVar:
         print(f"   Combined:       {total_time:.3f} seconds")
         print(f"   Total Calls:    {total_count}")
 
-        # 비율
+        # Share of total
         if total_time > 0:
             global_percent = (global_total / total_time) * 100
             local_percent = (local_total / total_time) * 100
@@ -158,7 +158,7 @@ class GlobalVar:
 
     ## function for obstacle information (BoundingBox) ##
     def setObstacleInfo(self):
-        """모든 Equipment의 BoundingBox를 장애물로 등록"""
+        """Register every equipment bounding box as a static obstacle."""
         for key, value in self.equipmentInfo.items():
             # Input Port BoundingBox
             if value.inputPort is not None:
@@ -194,7 +194,7 @@ class GlobalVar:
 
     ## function for waiting area information ##
     def setWaitingAreaInfo(self):
-        """Configuration에서 WaitingArea 정보 로드"""
+        """Load the waiting areas from the configuration."""
         if self.objConfiguration:
             watingAreaList = self.objConfiguration.getConfiguration(
                 "watingAreaInfo")
@@ -216,13 +216,12 @@ class GlobalVar:
         return self.watingAreaInfo.get(str(ID), None)
 
     def getClosestWaitingArea(self, position):
-        """가장 가까운 WaitingArea 찾기 (점유 상태 무시 - 여러 AMR 동시 사용 가능)"""
+        """Find the nearest waiting area. Areas are not exclusive, so several AMRs may share one."""
         import math
         min_distance = float('inf')
         closest_area = None
 
         for areaID, area in self.watingAreaInfo.items():
-            # 점유 상태 체크 제거 - 여러 AMR이 같은 WaitingArea 사용 가능
 
             area_pos = area.position
             distance = math.sqrt(
@@ -259,8 +258,7 @@ class WatingArea:
         self.strAreaID = str(areaID)
         self.position = position
         self.boundingBox = boundingBox
-        # Equipment의 undockedAMRs와 동일하게 set으로 관리
-        self.occupiedAMRs = set()  # WaitingArea에 있는 AMR ID들
+        self.occupiedAMRs = set()  # IDs of the AMRs parked in this waiting area
 
 
 class Equipment:
@@ -268,15 +266,15 @@ class Equipment:
         self.strEquipmentID = str(equipmentID)
         self.strStageID = str(stageID)
 
-        # 입력 포트 (AMR이 작업 투입)
+        # input port, where an AMR delivers a job
         # {'nodeID': 'B-1_IN', 'position': {...}, 'boundingBox': {...}}
         self.inputPort = inputPort
 
-        # 출력 포트 (AMR이 작업 회수)
+        # output port, where an AMR picks a job up
         # {'nodeID': 'B-1_OUT', 'position': {...}, 'boundingBox': {...}}
         self.outputPort = outputPort
 
-        # 작업 위치 (장비 본체)
+        # work position, the machine body
         # {'nodeID': 'B-1_WORK', 'position': {...}, 'boundingBox': {...}}
         self.workPosition = workPosition
 
@@ -290,7 +288,7 @@ class Equipment:
         self.lstProcessingJobID = []
         self.totalProcessedTime = 0
 
-        # UNDOCKING된 AMR ID 저장 (set)
+        # IDs of the AMRs that have undocked
         self.undockedAMRs = set()
 
     def setEquipmentState(self, state):
@@ -359,7 +357,7 @@ class Job:
 class Vehicle:
     def __init__(self, vehicleID, coordinates):
         self.strVehicleID = str(vehicleID)
-        self.lstCoordinates = coordinates  # [x, y] 현재 위치
+        self.lstCoordinates = coordinates  # current position, [x, y]
         # IDLE, RESERVED, MOVE, ARRIVAL, LIFTDOWN, LOAD, LIFTUP, FROMDONE, UNLOAD
         self.strState = "IDLE"
         self.intJobID = None
@@ -369,7 +367,7 @@ class Vehicle:
         self.dictActivationTime = {}
         self.doneWaitStartTime = None
         # Docking linkage
-        self.currentEquipmentID = None  # 도킹된 장비 ID
+        self.currentEquipmentID = None  # ID of the docked equipment
         self.dblYaw = None
 
     def setState(self, state):
@@ -379,11 +377,11 @@ class Vehicle:
             print(f"🔄 [AMR_STATE] {self.strVehicleID}: {old_state} → {state}")
 
     def setCoordinates(self, coorinates):
-        # 디버깅: 좌표 변경 추적
+        # debug tracing of coordinate updates
         import traceback
         import inspect
 
-        # 호출자 정보 가져오기
+        # caller frame
         stack = traceback.extract_stack()
         caller_info = stack[-2] if len(stack) >= 2 else None
         caller_file = caller_info.filename.split(

@@ -1,43 +1,35 @@
-"""
-TransportCommand: AMR의 물품 운반 명령 관리 클래스
+"""Transport commands for the AMR fleet.
 
-기존 OHT 스케줄링 방식을 참고하여 From-To 명령 체계로 구현
+Modelled on OHT scheduling practice, as a From-To command.
 """
 
 
 class TransportCommand:
-    """운반 명령 기본 클래스"""
+    """Base class for a transport command."""
 
     def __init__(self, commandID, jobID, fromLocation, toLocation, globalVar):
-        """
-        Args:
-            commandID: 명령 고유 ID
-            jobID: 작업 ID
-            fromLocation: 픽업 위치 정보 {'nodeID': str, 'position': dict, 'equipmentID': str}
-            toLocation: 전달 위치 정보 {'nodeID': str, 'position': dict, 'equipmentID': str}
-            globalVar: 전역 변수 객체
-        """
+        """fromLocation and toLocation are dicts of {'nodeID', 'position', 'equipmentID'}."""
         self.commandID = commandID
         self.jobID = jobID
         self.fromLocation = fromLocation
         self.toLocation = toLocation
         self.globalVar = globalVar
 
-        # 명령 상태
-        # PENDING: 대기중
-        # ASSIGNED: AMR 할당됨
-        # MOVING_TO_PICKUP: 픽업 위치로 이동중
-        # LOADING: 적재중
-        # TRANSPORTING: 운반중 (목적지로 이동)
-        # UNLOADING: 하역중
-        # DONE: 완료
+        # Command state
+        # PENDING:          waiting
+        # ASSIGNED:         an AMR has been assigned
+        # MOVING_TO_PICKUP: driving to the pickup point
+        # LOADING:          loading
+        # TRANSPORTING:     carrying the job to its destination
+        # UNLOADING:        unloading
+        # DONE:             finished
         self.status = "PENDING"
 
-        # AMR 할당 정보
+        # Assigned AMR
         self.assignedAMR = None
         self.assignedTime = None
 
-        # 시간 기록
+        # Timestamps
         self.createTime = None
         self.startTime = None
         self.pickupTime = None
@@ -45,17 +37,16 @@ class TransportCommand:
         self.completeTime = None
 
     def assignAMR(self, amrID, currentTime):
-        """AMR 할당"""
+        """Assign an AMR to this command."""
         self.assignedAMR = amrID
         self.assignedTime = currentTime
         self.status = "ASSIGNED"
 
     def updateStatus(self, newStatus, currentTime):
-        """상태 업데이트"""
+        """Update the command state and stamp the corresponding time."""
         oldStatus = self.status
         self.status = newStatus
 
-        # 시간 기록
         if newStatus == "MOVING_TO_PICKUP" and self.startTime is None:
             self.startTime = currentTime
         elif newStatus == "LOADING" and self.pickupTime is None:
@@ -68,39 +59,39 @@ class TransportCommand:
         return oldStatus
 
     def getFromPosition(self):
-        """픽업 위치 반환"""
+        """Pickup position."""
         return self.fromLocation['position']
 
     def getToPosition(self):
-        """목적지 위치 반환"""
+        """Destination position."""
         return self.toLocation['position']
 
     def getFromNodeID(self):
-        """픽업 노드 ID 반환"""
+        """Pickup node ID."""
         return self.fromLocation['nodeID']
 
     def getToNodeID(self):
-        """목적지 노드 ID 반환"""
+        """Destination node ID."""
         return self.toLocation['nodeID']
 
     def getSourceEquipmentID(self):
-        """출발 장비 ID 반환"""
+        """Source equipment ID."""
         return self.fromLocation.get('equipmentID', None)
 
     def getDestEquipmentID(self):
-        """목적지 장비 ID 반환"""
+        """Destination equipment ID."""
         return self.toLocation.get('equipmentID', None)
 
     def isCompleted(self):
-        """완료 여부"""
+        """Whether the command has finished."""
         return self.status == "DONE"
 
     def isPending(self):
-        """대기 중 여부"""
+        """Whether the command is still pending."""
         return self.status == "PENDING"
 
     def isAssigned(self):
-        """할당됨 여부"""
+        """Whether an AMR has been assigned."""
         return self.status != "PENDING" and not self.isCompleted()
 
     def __str__(self):
@@ -113,24 +104,19 @@ class TransportCommand:
 
 
 class SourceToEquipmentCommand(TransportCommand):
-    """Source에서 Equipment로 운반하는 명령"""
+    """Transport from the SOURCE to a process machine."""
 
     def __init__(self, commandID, jobID, sourceEquipment, targetEquipment, globalVar):
-        """
-        Args:
-            sourceEquipment: Source 장비 객체
-            targetEquipment: 목표 장비 객체
-        """
-        # Source의 InputPort로 진입 (픽업을 위해)
-        # AMR: SOURCE_IN → (내부) → SOURCE_OUT에서 픽업하고 진출
+        # pickup: enter through the SOURCE input port
+        # the AMR enters at SOURCE_IN and leaves loaded from SOURCE_OUT
         fromLocation = {
             'nodeID': sourceEquipment.inputPort['nodeID'] if sourceEquipment.inputPort else sourceEquipment.workPosition['nodeID'],
             'position': sourceEquipment.inputPort['position'] if sourceEquipment.inputPort else sourceEquipment.workPosition['position'],
             'equipmentID': sourceEquipment.strEquipmentID
         }
 
-        # 목표 장비의 InputPort로 진입 (전달을 위해)
-        # AMR: TARGET_IN → (하역) → TARGET_OUT으로 진출
+        # delivery: enter through the target machine's input port
+        # the AMR enters at TARGET_IN, unloads, and leaves by TARGET_OUT
         toLocation = {
             'nodeID': targetEquipment.inputPort['nodeID'] if targetEquipment.inputPort else targetEquipment.workPosition['nodeID'],
             'position': targetEquipment.inputPort['position'] if targetEquipment.inputPort else targetEquipment.workPosition['position'],
@@ -142,24 +128,19 @@ class SourceToEquipmentCommand(TransportCommand):
 
 
 class EquipmentToEquipmentCommand(TransportCommand):
-    """Equipment에서 다른 Equipment로 운반하는 명령"""
+    """Transport between two process machines."""
 
     def __init__(self, commandID, jobID, fromEquipment, toEquipment, globalVar):
-        """
-        Args:
-            fromEquipment: 출발 장비 객체
-            toEquipment: 목표 장비 객체
-        """
-        # 출발 장비의 InputPort로 진입 (픽업을 위해)
-        # AMR: FROM_IN → (내부) → FROM_OUT에서 픽업하고 진출
+        # pickup: enter through the source machine's input port
+        # the AMR enters at FROM_IN and leaves loaded from FROM_OUT
         fromLocation = {
             'nodeID': fromEquipment.inputPort['nodeID'] if fromEquipment.inputPort else fromEquipment.workPosition['nodeID'],
             'position': fromEquipment.inputPort['position'] if fromEquipment.inputPort else fromEquipment.workPosition['position'],
             'equipmentID': fromEquipment.strEquipmentID
         }
 
-        # 목표 장비의 InputPort로 진입 (전달을 위해)
-        # AMR: TO_IN → (하역) → TO_OUT으로 진출
+        # delivery: enter through the target machine's input port
+        # the AMR enters at TO_IN, unloads, and leaves by TO_OUT
         toLocation = {
             'nodeID': toEquipment.inputPort['nodeID'] if toEquipment.inputPort else toEquipment.workPosition['nodeID'],
             'position': toEquipment.inputPort['position'] if toEquipment.inputPort else toEquipment.workPosition['position'],
@@ -171,24 +152,19 @@ class EquipmentToEquipmentCommand(TransportCommand):
 
 
 class EquipmentToSinkCommand(TransportCommand):
-    """Equipment에서 Sink로 운반하는 명령 (최종 완료)"""
+    """The final transport, from a process machine to the SINK."""
 
     def __init__(self, commandID, jobID, fromEquipment, sinkEquipment, globalVar):
-        """
-        Args:
-            fromEquipment: 출발 장비 객체
-            sinkEquipment: Sink 장비 객체
-        """
-        # 출발 장비의 InputPort로 진입 (픽업을 위해)
-        # AMR: FROM_IN → (내부) → FROM_OUT에서 픽업하고 진출
+        # pickup: enter through the source machine's input port
+        # the AMR enters at FROM_IN and leaves loaded from FROM_OUT
         fromLocation = {
             'nodeID': fromEquipment.inputPort['nodeID'] if fromEquipment.inputPort else fromEquipment.workPosition['nodeID'],
             'position': fromEquipment.inputPort['position'] if fromEquipment.inputPort else fromEquipment.workPosition['position'],
             'equipmentID': fromEquipment.strEquipmentID
         }
 
-        # Sink의 InputPort로 진입 (전달을 위해)
-        # AMR: SINK_IN → (하역) → SINK_OUT으로 진출
+        # delivery: enter through the SINK input port
+        # the AMR enters at SINK_IN, unloads, and leaves by SINK_OUT
         toLocation = {
             'nodeID': sinkEquipment.inputPort['nodeID'] if sinkEquipment.inputPort else sinkEquipment.workPosition['nodeID'],
             'position': sinkEquipment.inputPort['position'] if sinkEquipment.inputPort else sinkEquipment.workPosition['position'],
@@ -200,7 +176,7 @@ class EquipmentToSinkCommand(TransportCommand):
 
 
 class TransportCommandManager:
-    """운반 명령 관리자"""
+    """Creates and holds the transport commands."""
 
     def __init__(self, globalVar):
         self.globalVar = globalVar
@@ -208,21 +184,11 @@ class TransportCommandManager:
         self.nextCommandID = 1
 
     def createCommand(self, jobID, fromEquipment, toEquipment):
-        """
-        운반 명령 생성
-
-        Args:
-            jobID: 작업 ID
-            fromEquipment: 출발 장비 객체
-            toEquipment: 목표 장비 객체
-
-        Returns:
-            TransportCommand 객체
-        """
+        """Build the transport command that matches the source and target machine types."""
         commandID = f"CMD_{self.nextCommandID:06d}"
         self.nextCommandID += 1
 
-        # 명령 타입에 따라 적절한 클래스 선택
+        # the machine types select the command class
         if fromEquipment.strType == "SOURCE":
             command = SourceToEquipmentCommand(
                 commandID, jobID, fromEquipment, toEquipment, self.globalVar)
@@ -237,26 +203,26 @@ class TransportCommandManager:
         return command
 
     def getCommand(self, commandID):
-        """명령 조회"""
+        """Look a command up by its ID."""
         return self.commands.get(commandID, None)
 
     def getPendingCommands(self):
-        """대기 중인 명령 리스트"""
+        """Commands still pending."""
         return [cmd for cmd in self.commands.values() if cmd.isPending()]
 
     def getActiveCommands(self):
-        """실행 중인 명령 리스트"""
+        """Commands in progress."""
         return [cmd for cmd in self.commands.values() if cmd.isAssigned()]
 
     def getCommandsByAMR(self, amrID):
-        """특정 AMR에 할당된 명령 리스트"""
+        """Commands assigned to one AMR."""
         return [cmd for cmd in self.commands.values() if cmd.assignedAMR == amrID]
 
     def getCommandsByJob(self, jobID):
-        """특정 Job 관련 명령 리스트"""
+        """Commands belonging to one job."""
         return [cmd for cmd in self.commands.values() if cmd.jobID == jobID]
 
     def removeCommand(self, commandID):
-        """명령 제거"""
+        """Remove a command."""
         if commandID in self.commands:
             del self.commands[commandID]

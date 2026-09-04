@@ -32,7 +32,6 @@ class Sensor(DEVSAtomicModel):
         self.objConfiguration = objConfiguration
         self.pose_storage = PoseStorage()
 
-        # job 관련 포트 제거하고 위치 정보 관련 포트만 유지
         self.addInputPort("OtherManeuverState_I")
         self.addInputPort("Complete_job_I")
         self.addOutputPort("OtherManeuverState_O")

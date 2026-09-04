@@ -6,18 +6,18 @@ import time
 from datetime import datetime
 
 
-# JSON 파일 로드
+# Load the configuration files
 strPath = "JSON/"
 lstFileNames = ["setup", "map", "processInfo", "vehicleInfo"]
 envLoader = EnvironmentLoader(strPath, lstFileNames)
 objConfiguration = envLoader.getConfiguration()
 
-# 설정 읽기
+# Run mode
 monteCarlo = objConfiguration.getConfiguration("monteCarlo")
 vehicle_change_mode = objConfiguration.getConfiguration("Vehiclechange")
 max_vehicles = objConfiguration.getConfiguration("numVehicles")
 
-# 공유 타임스탬프 생성
+# One timestamp shared by every replication of this run
 shared_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
 print(f"\n{'='*70}")
@@ -29,14 +29,14 @@ else:
     print(f"🎲 Monte Carlo Simulation Started ({monteCarlo} iterations)")
 print(f"{'='*70}\n")
 
-# 몬테카를로 분석기 초기화
+# Monte Carlo analyser
 mc_analyzer = MonteCarloAnalyzer(
     num_iterations=monteCarlo,
     shared_timestamp=shared_timestamp,
     vehicle_change_mode=vehicle_change_mode
 )
 
-# 전체 시뮬레이션 시작 시간
+# Wall-clock start of the whole campaign
 total_start_time = time.time()
 total_sim_time = 0.0
 
@@ -51,10 +51,10 @@ if vehicle_change_mode:
         print(f"🚗 차량 수: {vehicle_count}대 ({vehicle_count}/{max_vehicles})")
         print(f"{'='*70}\n")
 
-        # 시나리오 등록
+        # Register the scenario
         mc_analyzer.register_scenario(scenario_label, vehicle_count)
 
-        # 차량 수 설정 업데이트
+        # Fleet size for this scenario
         objConfiguration.addConfiguration("numVehicles", vehicle_count)
 
         for iteration in range(1, monteCarlo + 1):
@@ -64,14 +64,14 @@ if vehicle_change_mode:
 
             start_time = time.time()
 
-            # 시뮬레이션 모델 생성
+            # Build the simulation model
             objModels = AMRSimModel(
                 objConfiguration,
                 iteration_num=iteration,
                 scenario_label=scenario_label
             )
 
-            # 시뮬레이션 엔진 실행
+            # Run the engine
             engine = SimulationEngine()
             engine.setOutmostModel(objModels)
             engine.run(
@@ -87,18 +87,18 @@ if vehicle_change_mode:
 
             elapsed_time = time.time() - start_time
 
-            # 결과 수집
+            # Collect the results
             iteration_results = objModels.get_iteration_results()
             sim_time = iteration_results.get('sim_time', engine.getTime())
             total_sim_time += sim_time
 
-            # 시간 정보 추가
+            # Attach the wall-clock timings
             time_ratio = elapsed_time / sim_time if sim_time > 0 else 0
             iteration_results['real_time'] = elapsed_time
             iteration_results['time_ratio'] = time_ratio
             iteration_results['vehicle_count'] = vehicle_count
 
-            # 결과 저장
+            # Store the results
             mc_analyzer.add_iteration_result(
                 iteration, iteration_results, scenario_label=scenario_label)
 
@@ -110,7 +110,7 @@ if vehicle_change_mode:
             print(f"  - Wait Time: {iteration_results['avg_wait_time']:.2f}s")
 
 else:
-    # ==================== 일반 Monte Carlo Mode ====================
+    # ==================== Plain Monte Carlo Mode ====================
     for iteration in range(1, monteCarlo + 1):
         print(f"\n{'─'*70}")
         print(f"▶ Iteration {iteration}/{monteCarlo} - 시뮬레이션 시작")
@@ -118,10 +118,10 @@ else:
 
         start_time = time.time()
 
-        # 시뮬레이션 모델 생성
+        # Build the simulation model
         objModels = AMRSimModel(objConfiguration, iteration_num=iteration)
 
-        # 시뮬레이션 엔진 실행
+        # Run the engine
         engine = SimulationEngine()
         engine.setOutmostModel(objModels)
         engine.run(
@@ -137,17 +137,17 @@ else:
 
         elapsed_time = time.time() - start_time
 
-        # 결과 수집
+        # Collect the results
         iteration_results = objModels.get_iteration_results()
         sim_time = iteration_results.get('sim_time', engine.getTime())
         total_sim_time += sim_time
 
-        # 시간 정보 추가
+        # Attach the wall-clock timings
         time_ratio = elapsed_time / sim_time if sim_time > 0 else 0
         iteration_results['real_time'] = elapsed_time
         iteration_results['time_ratio'] = time_ratio
 
-        # 결과 저장
+        # Store the results
         mc_analyzer.add_iteration_result(iteration, iteration_results)
 
         print(f"\n✓ Iteration {iteration}/{monteCarlo} 완료")
@@ -172,19 +172,19 @@ else:
         print(
             f"  - Local Planner: {iteration_results['local_planner_time']:.3f}s ({iteration_results['local_planner_calls']} calls)")
 
-# 몬테카를로 통합 분석 수행
+# Aggregate across replications
 print(f"\n{'='*70}")
 print(f"📊 Monte Carlo 통합 분석 시작...")
 print(f"{'='*70}\n")
 
 mc_analyzer.analyze_and_save()
 
-# 최종 알고리즘 성능 통계 출력
+# Planner computation-time statistics
 if not vehicle_change_mode:
     print("\n🎯 Final Algorithm Statistics:")
     objModels.globalVar.print_algorithm_statistics()
 
-# 전체 시뮬레이션 종료 시간 계산
+# Total wall-clock time
 total_elapsed_time = time.time() - total_start_time
 total_time_ratio = total_elapsed_time / \
     total_sim_time if total_sim_time > 0 else 0

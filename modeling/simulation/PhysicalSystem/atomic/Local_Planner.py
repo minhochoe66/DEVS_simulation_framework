@@ -16,8 +16,8 @@ class LocalPlanner(DEVSAtomicModel):
         # Configuration
         self.objConfiguration = objConfiguration
         self.globalVar = globalVar
-        self.safety_tolerance = 8.0  # 다른 AMR 감지 거리 (8m)
-        self.collision_radius = 3.0  # 충돌 회피 반경 (3m)
+        self.safety_tolerance = 8.0  # peer detection range, 8 m
+        self.collision_radius = 3.0  # collision-avoidance radius, 3 m
 
         # State variables
         self.goal = None
@@ -26,17 +26,17 @@ class LocalPlanner(DEVSAtomicModel):
         # {agent_id: {'pos': (x,y), 'vel': (vx,vy), 'time': t}}
         self.other_agents = {}
 
-    # Transport Phase 정보
+        # Transport phase
         self.transportPhase = None  # "TO_FROM" or "TO_DESTINATION"
-        self.path = []  # 전체 경로
-        self.currentGoalNodeID = None  # 현재 목표 NodeID (장애물 제외용)
-        self.previousEquipmentID = None  # 이전 장비 ID (UNDOCKING 후 장애물 제외용)
-        self.yaw_forced = False  # yaw 강제 설정 완료 플래그
-        self.needs_yaw_force = False  # yaw 강제 설정이 필요한지 여부 (언도킹 직후)
+        self.path = []  # the whole path
+        self.currentGoalNodeID = None  # current goal node ID, used to exclude it from the obstacles
+        self.previousEquipmentID = None  # previous machine ID, excluded from the obstacles after undocking
+        self.yaw_forced = False  # whether the yaw has already been pinned
+        self.needs_yaw_force = False  # whether the yaw needs pinning, straight after undocking
 
-        # 정적 장애물 캐싱 (성능 향상)
-        self.cached_static_polygons = None  # 캐싱된 Polygon 리스트
-        self.cached_exclude_nodes = None  # 캐싱 시 제외했던 노드
+        # Cached static obstacles
+        self.cached_static_polygons = None  # the cached polygons
+        self.cached_exclude_nodes = None  # the nodes excluded when the cache was built
 
         # Initialize DWA Planner
         self.dwa = DWAPlanner(objConfiguration)
@@ -50,89 +50,88 @@ class LocalPlanner(DEVSAtomicModel):
         self.replan_check_start_time = None
         self.replan_check_initial_distance = None
         self.replan_check_initial_position = None
-        self.replan_check_threshold_time = 5.0  # 5초 동안 진전 없으면 재계획
-        self.replan_check_distance_improvement = 2.0  # 최소 2m 이상 개선되어야 함
-        self.replan_check_position_movement = 1.0  # 최소 1m 이상 이동해야 함
+        self.replan_check_threshold_time = 5.0  # replan after 5 s without progress
+        self.replan_check_distance_improvement = 2.0  # progress means closing at least 2 m
+        self.replan_check_position_movement = 1.0  # and moving at least 1 m
 
         # Logging variables
         self._last_pose_log_time = 0
         self._last_dwa_log_time = 0
 
-        # 회피 관련 변수 추가
-        self.is_in_avoidance = False  # 회피 모드 플래그
+        # Avoidance state
+        self.is_in_avoidance = False  # whether avoidance is active
         self.avoidance_clearance_threshold = self.safety_tolerance + \
-            2.0  # 회피 종료 임계값 (히스테리시스)
+            2.0  # release threshold, giving the mode hysteresis
 
         # DEVS state
         self.addStateVariable("state", "WAIT")
 
         # Input Ports
-        self.addInputPort("GlobalWaypoint_I")  # Global Planner로부터 waypoint 수신
-        self.addInputPort("agent_pose_I")      # 다른 에이전트/장애물 위치 수신
-        self.addInputPort("ManeuverState_I")   # 자신의 현재 위치 수신
-        self.addInputPort("OtherManeuverState_I")  # 다른 AMR 위치 수신
+        self.addInputPort("GlobalWaypoint_I")  # waypoints from Global_Planner
+        self.addInputPort("agent_pose_I")      # poses of peers and obstacles
+        self.addInputPort("ManeuverState_I")   # this robot's pose
+        self.addInputPort("OtherManeuverState_I")  # peer robot poses
 
         # Output Ports
-        self.addOutputPort("RequestManeuver_O")  # Maneuver에게 목표 전송
-        self.addOutputPort("Replan")             # Global Planner에게 재계획 요청
-        self.addOutputPort("DeliveryComplete")   # To Equipment 도착 (하역 완료)
-        self.addOutputPort("Docking")            # Maneuver에게 도킹 명령 전달
-        self.addOutputPort("EquipmentDocking")   # Equipment에게 도킹 알림
-        self.addOutputPort("UndockingComplete")  # FleetManagement에게 언도킹 완료 신호
-        self.addOutputPort("Undocking_O")        # Maneuver에게 언도킹 명령 전달
+        self.addOutputPort("RequestManeuver_O")  # goal sent to Maneuver
+        self.addOutputPort("Replan")             # replan request to Global_Planner
+        self.addOutputPort("DeliveryComplete")   # arrived at the destination machine, unloaded
+        self.addOutputPort("Docking")            # docking command to Maneuver
+        self.addOutputPort("EquipmentDocking")   # docking notice to Equipment
+        self.addOutputPort("UndockingComplete")  # undocking complete, to FleetManagement
+        self.addOutputPort("Undocking_O")        # undocking command to Maneuver
 
     def funcExternalTransition(self, strPort, objEvent):
         state = self.getStateValue("state")
 
         if strPort == "GlobalWaypoint_I":
-            # Global Planner로부터 waypoint 수신 (MsgGoal 객체)
+            # waypoints from Global_Planner, as a MsgGoal
             if hasattr(objEvent, 'strID') and objEvent.strID.split('_', 1)[0] == self.ID.split('_', 1)[0]:
-                # Global Planner로부터 waypoint 수신
-                # TransportCommand 기반: From/To Equipment의 IN 포트로 이동
+                # head for the IN port of the pickup or destination machine, per the transport command
                 self.goal = (objEvent.dblPositionX, objEvent.dblPositionY)
 
-                # Transport Phase 정보 저장 (Global_Planner의 phase)
+                # take the transport phase from Global_Planner
                 self.transportPhase = objEvent.transportPhase if objEvent.transportPhase else None
 
-                # 경로 정보 저장
+                # store the path
                 self.path = objEvent.path if objEvent.path else []
 
-                # 현재 목표 NodeID 저장 (장애물 제외용)
+                # current goal node ID, used to exclude it from the obstacles
                 self.currentGoalNodeID = objEvent.goalNodeID if objEvent.goalNodeID else None
 
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][LocalPlanner({self.ID})] Received waypoint: {self.goal}, Phase: {self.transportPhase}, NodeID: {self.currentGoalNodeID}"
                 )
 
-                # TO_DESTINATION 단계가 아니면 previousEquipmentID 초기화
+                # outside TO_DESTINATION, clear previousEquipmentID
                 if self.transportPhase == "TO_FROM" or self.transportPhase == "WAITING":
                     self.previousEquipmentID = None
-                    # TO_FROM/WAITING 단계에서는 yaw 강제 설정 불필요
+                    # the TO_FROM and WAITING phases need no yaw pinning
                     self.needs_yaw_force = False
                     self.yaw_forced = False
 
-                # 새로운 목표를 받았으므로 재계획 체크 리셋
+                # a new goal resets the progress tracking
                 self.reset_replan_check()
 
-                # 회피 모드 리셋 (새로운 글로벌 경로)
+                # a new global path clears avoidance mode
                 if self.is_in_avoidance:
                     self.globalVar.printTerminal(
                         f"[{self.getTime()}][LocalPlanner({self.ID})] 새로운 경로 수신! AVOIDANCE 모드 종료"
                     )
                     self.is_in_avoidance = False
 
-                # 정적 장애물 캐시 무효화 (목표가 바뀌었으므로)
+                # the goal moved, so the static obstacle cache is stale
                 self.cached_static_polygons = None
                 self.cached_exclude_nodes = None
 
                 self.setStateValue("state", "PLAN")
 
         elif strPort == "ManeuverState_I":
-            # 자신의 현재 위치 업데이트
+            # update this robot's pose
             event_id = objEvent.strID.split('_', 1)[0]
             my_id = self.ID.split('_', 1)[0]
 
-            # 1초마다만 로그 출력
+            # log at most once per second
             should_log = (self.getTime() - self._last_pose_log_time >= 1.0)
 
             if event_id == my_id:
@@ -153,12 +152,12 @@ class LocalPlanner(DEVSAtomicModel):
                         print(f"   Distance to goal: {distance:.2f}m")
                     self._last_pose_log_time = self.getTime()
 
-                # UNDOCKING 직후 첫 PLAN 상태에서만 yaw를 90도로 강제 설정 (한 번만)
-                # Equipment 언도킹 또는 WaitingArea 언도킹 후 모두 처리
+                # pin the yaw to 90 degrees once, on the first PLAN after undocking
+                # covers undocking from a machine and from a waiting area
                 if state == "PLAN" and (self.needs_yaw_force or (self.previousEquipmentID and not self.yaw_forced)):
-                    self.curPose[2] = np.pi / 2  # 90도로 강제 설정
-                    self.yaw_forced = True  # 플래그 설정 (한 번만 실행)
-                    self.needs_yaw_force = False  # 사용 완료
+                    self.curPose[2] = np.pi / 2  # pin to 90 degrees
+                    self.yaw_forced = True  # mark it done, so it runs only once
+                    self.needs_yaw_force = False  # request consumed
                     source = f"Equipment {self.previousEquipmentID}" if self.previousEquipmentID else "WaitingArea"
                     print(
                         f"   🔄 [ONCE] Forced yaw to 90° after UNDOCKING from {source}")
@@ -170,18 +169,18 @@ class LocalPlanner(DEVSAtomicModel):
                 self.continueTimeAdvance()
 
         elif strPort == "OtherManeuverState_I":
-            # 다른 AMR의 위치 정보 수신 (자기 자신은 제외)
+            # peer poses, excluding this robot
             other_agent_id = objEvent.strID.split(
                 '_')[0] if '_' in objEvent.strID else objEvent.strID
             my_id = self.ID.split('_', 1)[0]
 
             if other_agent_id != my_id:
-                # 다른 AMR의 위치 정보 저장 (MsgManeuverState는 dblPositionX, dblPositionY 사용)
+                # MsgManeuverState carries dblPositionX and dblPositionY
                 current_time = self.getTime()
                 other_pos = (objEvent.dblPositionX, objEvent.dblPositionY)
 
-                # 속도 계산: 이전 위치가 있으면 위치 변화로부터 계산
-                other_vel = (0.0, 0.0)  # 기본값
+                # with a previous pose, derive the speed from the displacement
+                other_vel = (0.0, 0.0)  # default
                 if other_agent_id in self.other_agents:
                     prev_data = self.other_agents[other_agent_id]
                     prev_pos = prev_data['pos']
@@ -189,23 +188,23 @@ class LocalPlanner(DEVSAtomicModel):
                     dt = current_time - prev_time
 
                     if dt > 0:
-                        # 실제 이동 속도 계산 (위치 변화로부터)
+                        # actual speed, from the displacement
                         vx = (other_pos[0] - prev_pos[0]) / dt
                         vy = (other_pos[1] - prev_pos[1]) / dt
                         other_vel = (vx, vy)
 
-                # 다른 AMR 정보 업데이트
+                # update the peer record
                 self.other_agents[other_agent_id] = {
                     'pos': other_pos,
                     'vel': other_vel,
                     'time': current_time
                 }
 
-                # 충돌 위험 판단 (거리 + 속도 + 전방 시야)
+                # collision risk is judged from distance, speed and field of view
                 distance = self.check_agent_distance(other_agent_id)
 
-                # 전방 시야(약 120°) 내에 있는 경우만 장애물 후보로 고려
-                fov_rad = 2.0 * np.pi / 3.0  # 120도
+                # only peers within about 120 degrees ahead count as obstacles
+                fov_rad = 2.0 * np.pi / 3.0  # 120 degrees
                 rel_vec = np.array(other_pos) - np.array(self.curPose[:2])
                 angle_to_other = math.atan2(rel_vec[1], rel_vec[0])
                 rel_angle = (
@@ -213,12 +212,12 @@ class LocalPlanner(DEVSAtomicModel):
                 in_front = abs(rel_angle) <= (fov_rad / 2.0)
 
                 if distance < self.safety_tolerance and in_front:
-                    # 가까운 거리에 있으면 장애물로 등록
+                    # register it as an obstacle when close
                     collision_risk = self.predict_collision_risk(
                         other_agent_id)
 
                     if collision_risk or distance < self.collision_radius:
-                        # 충돌 위험이 있거나 매우 가까우면 장애물로 등록
+                        # register it when a collision is predicted, or it is very close
                         self.obstacles[other_agent_id] = other_pos
 
                         if distance < self.collision_radius:
@@ -226,18 +225,18 @@ class LocalPlanner(DEVSAtomicModel):
                                 f"[{current_time}][LocalPlanner({self.ID})] ⚠️ 근접 경고: {other_agent_id} at {distance:.2f}m"
                             )
 
-                        # ✨ 회피 플래그 설정 (상태 전환 없이 플래그만 설정)
+                        # set the avoidance flag without changing state
                         if not self.is_in_avoidance:
                             self.globalVar.printTerminal(
                                 f"[{current_time}][LocalPlanner({self.ID})] 🚨 장애물 감지! 회피 모드 ON (거리: {distance:.2f}m)"
                             )
                             self.is_in_avoidance = True
                     else:
-                        # 충돌 위험 없으면 장애물에서 제거
+                        # no risk: drop it from the obstacles
                         if other_agent_id in self.obstacles:
                             del self.obstacles[other_agent_id]
                 else:
-                    # 전방이 아니거나 안전 거리 밖이면 장애물에서 제거
+                    # behind, or beyond the safe distance: drop it from the obstacles
                     if other_agent_id in self.obstacles:
                         del self.obstacles[other_agent_id]
 
@@ -246,7 +245,7 @@ class LocalPlanner(DEVSAtomicModel):
         elif strPort == "UndockingComplete_I":
             # objEvent: [amrID, equipmentID, jobID, phase]
             if objEvent[0] == self.ID.split('_')[0]:
-                # WaitingArea에 이미 있는 경우 무시 (중복 신호 방지)
+                # already in the waiting area: ignore the repeated signal
                 is_in_waiting_area = (self.currentGoalNodeID and
                                       self.currentGoalNodeID.startswith('WAITING_AREA') and
                                       self.transportPhase == "TO_DESTINATION")
@@ -270,7 +269,7 @@ class LocalPlanner(DEVSAtomicModel):
                 self.setStateValue("state", "WAIT")
                 return
 
-            # 진전도 체크 - 재계획 필요 여부 확인
+            # check for progress, and replan if there is none
             if self.replan_check():
                 self.setStateValue("state", "REPLAN")
                 return
@@ -278,14 +277,14 @@ class LocalPlanner(DEVSAtomicModel):
             distance_to_goal = self.check_distance()
             obstacle_distance = self.check_obstacle_distance()
 
-            # 🔍 회피 모드 자동 해제 체크 (장애물이 충분히 멀어졌는지)
+            # release avoidance mode once the obstacles are far enough away
             if self.is_in_avoidance and obstacle_distance > self.avoidance_clearance_threshold:
                 self.is_in_avoidance = False
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][LocalPlanner({self.ID})] ✅ 회피 모드 OFF! 장애물 거리: {obstacle_distance:.2f}m"
                 )
 
-            # 목표 도달 확인
+            # have we reached the goal?
             target_tolerance = self.objConfiguration.getConfiguration(
                 'target_tolerance') or 5.0
             if distance_to_goal < target_tolerance:
@@ -294,12 +293,10 @@ class LocalPlanner(DEVSAtomicModel):
                     f"[{self.getTime()}][LocalPlanner({self.ID})] Arrived at waypoint (Phase: {phase_str})"
                 )
 
-                # 목표 도달 시 재계획 체크 리셋
+                # on arrival, reset the progress tracking
                 self.reset_replan_check()
 
-                # 상단 WAITING 전용 분기 제거: 하단 공통 로직에서 처리
-
-                # 최종 목적지 좌표 계산 (WaitingArea 또는 Equipment 공통 처리)
+                # final destination, handling waiting areas and machines alike
                 is_waiting_area_goal = (self.currentGoalNodeID and
                                         isinstance(self.currentGoalNodeID, str) and
                                         self.currentGoalNodeID.startswith('WAITING_AREA'))
@@ -311,7 +308,7 @@ class LocalPlanner(DEVSAtomicModel):
                         dest_x = waiting_area.position['x']
                         dest_y = waiting_area.position['y']
                     else:
-                        # 폴백: current goal 또는 현재 위치 사용
+                        # fallback: the current goal, or the current pose
                         dest_x = (
                             self.goal[0] if self.goal else self.curPose[0])
                         dest_y = (
@@ -324,23 +321,23 @@ class LocalPlanner(DEVSAtomicModel):
                     dest_x = equipmentInfo_inputPort['x']
                     dest_y = equipmentInfo_inputPort['y']
 
-                # numpy array로 변환하여 거리 계산
+                # convert to numpy arrays for the distance computation
                 final_destination = np.array([dest_x, dest_y])
                 current_position = np.array(self.curPose[:2])
                 distance_to_final = np.linalg.norm(
                     final_destination - current_position)
 
                 if distance_to_final < 5.0:
-                    # 최종 목적지 도착 → DOCKING
+                    # reaching the final destination leads to DOCKING
                     if self.transportPhase == "TO_FROM":
-                        # From Equipment 도착 → 도킹 지시
+                        # at the pickup machine: order docking
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][LocalPlanner({self.ID})] 🎯 Arrived at FINAL destination (FROM Equipment)"
                         )
                         self.setStateValue("state", "DOCKING")
 
                     elif self.transportPhase == "TO_DESTINATION":
-                        # To Equipment 도착 → 도킹 지시
+                        # at the destination machine: order docking
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][LocalPlanner({self.ID})] 🎯 Arrived at FINAL destination (TO Equipment)"
                         )
@@ -352,31 +349,31 @@ class LocalPlanner(DEVSAtomicModel):
                         self.setStateValue("state", "UNDOCKING")
                         return
                     else:
-                        # transportPhase가 None이거나 다른 값이면 재계획
+                        # an absent or unexpected transportPhase triggers a replan
                         self.setStateValue("state", "REPLAN")
                     return
                 else:
-                    # 중간 waypoint 도달 → 다음 waypoint로 이동
+                    # an intermediate waypoint is reached: move to the next
                     next_waypoint = self.get_next_waypoint()
                     if next_waypoint:
                         self.goal = next_waypoint
-                        # 새로운 waypoint로 이동하므로 재계획 체크 리셋
+                        # the goal moved, so reset the progress tracking
                         self.reset_replan_check()
-                        # 정적 장애물 캐시 무효화 (목표가 바뀌었으므로)
+                        # and invalidate the static obstacle cache
                         self.cached_static_polygons = None
                         self.cached_exclude_nodes = None
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][LocalPlanner({self.ID})] ✓ Passed intermediate waypoint, moving to next: {self.goal}"
                         )
                     else:
-                        # 다음 waypoint가 없으면 재계획
+                        # no next waypoint: replan
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][LocalPlanner({self.ID})] ⚠️ No next waypoint available, requesting replan"
                         )
                         self.setStateValue("state", "REPLAN")
                     return
 
-            # 🚗 DWA 실행 (회피 모드면 파라미터가 자동 조정됨)
+            # run DWA; in avoidance mode it runs with adjusted parameters
             start_time = time.time()
             target_state = self.calc_dwa()
             end_time = time.time()
@@ -385,7 +382,7 @@ class LocalPlanner(DEVSAtomicModel):
             self.globalVar.LocalPlanner_call_count += 1
 
             if target_state is None:
-                # 경로를 찾지 못한 경우 재계획 요청
+                # no feasible trajectory: ask for a replan
                 mode_str = "AVOIDANCE" if self.is_in_avoidance else "PLAN"
                 print(f"   ❌ DWA FAILED ({mode_str})")
                 self.globalVar.printTerminal(
@@ -394,12 +391,12 @@ class LocalPlanner(DEVSAtomicModel):
                 self.setStateValue("state", "REPLAN")
                 return
 
-            # 타겟 업데이트
+            # update the target
             self.target_x = target_state[0]
             self.target_y = target_state[1]
             self.target_yaw = target_state[2]
 
-            # DWA 결과 로깅 (1초마다, 회피 모드 표시)
+            # log the DWA result once per second, noting whether avoidance is on
             if self.getTime() - self._last_dwa_log_time >= 1.0:
                 current_dist = np.linalg.norm(
                     np.array(self.goal) - np.array(self.curPose[:2]))
@@ -418,32 +415,32 @@ class LocalPlanner(DEVSAtomicModel):
             self.setStateValue("state", "SEND")
 
         elif state == "SEND":
-            # 항상 PLAN으로 복귀 (회피 모드는 플래그로만 관리)
+            # always return to PLAN; avoidance is carried by the flag alone
             self.setStateValue("state", "PLAN")
 
         elif state == "REPLAN":
-            # Global Planner에게 재계획 요청 후 대기
+            # request a replan and wait
             self.reset_replan_check()
             self.setStateValue("state", "WAIT")
 
         elif state == "DOCKING":
-            # Equipment는 도킹 후 jobExchange 대기
-            # (WaitingArea는 여기로 오지 않음 - 바로 UNDOCKING으로 감)
+            # at a machine, wait for jobExchange after docking
+            # a waiting area never reaches here; it goes straight to UNDOCKING
             self.setStateValue("state", "WAIT")
 
         elif state == "UNDOCKING":
-            # WaitingArea와 Equipment 구분
+            # distinguish a waiting area from a machine
             is_waiting_area = (self.currentGoalNodeID and
                                self.currentGoalNodeID.startswith('WAITING_AREA'))
 
             if is_waiting_area:
-                # WaitingArea는 previousEquipmentID 설정 안 함
+                # a waiting area sets no previousEquipmentID
                 self.previousEquipmentID = None
-                # WaitingArea는 yaw 강제 설정 불필요 (그냥 멈추기만 하면 됨)
+                # in a waiting area the robot only has to stop, so the yaw is left alone
                 self.needs_yaw_force = False
-                self.yaw_forced = False  # 플래그 초기화
+                self.yaw_forced = False  # clear the flag
 
-                # 🔍 WaitingArea 언도킹 시 전체 상태 출력
+                # trace the state when undocking from a waiting area
                 amrID = self.ID.split('_')[0]
                 self.globalVar.printTerminal(
                     f"\n{'='*80}\n"
@@ -478,13 +475,13 @@ class LocalPlanner(DEVSAtomicModel):
                 equipmentID = self.currentGoalNodeID.split(
                     '_')[0] if self.currentGoalNodeID else None
 
-                # 이전 장비 ID 저장 (DWA에서 장애물 제외용)
+                # previous machine ID, excluded from the DWA obstacles
                 self.previousEquipmentID = equipmentID
-                # yaw 강제 설정 플래그 초기화
+                # arm the yaw pinning
                 self.needs_yaw_force = True
                 self.yaw_forced = False
 
-            # 정적 장애물 캐시 무효화
+            # invalidate the static obstacle cache
             self.cached_static_polygons = None
             self.cached_exclude_nodes = None
 
@@ -497,7 +494,7 @@ class LocalPlanner(DEVSAtomicModel):
         state = self.getStateValue("state")
 
         if state == "SEND":
-            # Maneuver에게 목표 전송
+            # send the target to Maneuver
             objRequestMessage = MsgManeuverState(
                 self.ID,
                 self.target_x,
@@ -509,7 +506,7 @@ class LocalPlanner(DEVSAtomicModel):
             )
 
         elif state == "REPLAN":
-            # Global Planner에게 재계획 요청
+            # ask Global_Planner to replan
             done_message = MsgManeuverState(
                 self.ID,
                 self.curPose[0],
@@ -521,7 +518,7 @@ class LocalPlanner(DEVSAtomicModel):
             )
 
         elif state == "DOCKING":
-            # 도킹 명령 전송 (Maneuver용)
+            # send the docking command to Maneuver
             docking_x = self.goal[0] if self.goal else self.curPose[0]
             docking_y = self.goal[1] if self.goal else self.curPose[1]
             docking_message = MsgManeuverState(
@@ -531,10 +528,10 @@ class LocalPlanner(DEVSAtomicModel):
             )
             self.addOutputEvent("Docking_O", docking_message)
 
-            # Equipment용 도킹 알림 (phase 포함)
+            # tell Equipment about the docking, including the phase
             # [amrID, equipmentID, phase]
             vehicle_id = self.ID.split('_', 1)[0]
-            # currentGoalNodeID (예: "A-1_IN")에서 equipmentID 추출
+            # derive the equipment ID from currentGoalNodeID, e.g. "A-1_IN"
             equipment_id = self.currentGoalNodeID.split(
                 '_')[0] if self.currentGoalNodeID and '_' in self.currentGoalNodeID else None
             if equipment_id and self.transportPhase:
@@ -552,13 +549,13 @@ class LocalPlanner(DEVSAtomicModel):
         elif state == "UNDOCKING":
             amrID = self.ID.split('_')[0]
 
-            # WaitingArea와 Equipment 구분
-            # WaitingArea ID는 "WAITING_AREA_xxx" 형태 (underscore 2개 이상)
-            # Equipment ID는 "A-1_IN" 또는 "A-1_OUT" 형태 (underscore 1개 + IN/OUT)
+            # distinguish a waiting area from a machine
+            # a waiting-area ID looks like "WAITING_AREA_xxx", with two or more underscores
+            # a machine ID looks like "A-1_IN" or "A-1_OUT", with one underscore
             is_waiting_area = (self.currentGoalNodeID and
                                self.currentGoalNodeID.startswith('WAITING_AREA'))
 
-            # 🔍 디버깅 로그
+            # debug trace
             print(f"🔍 [UNDOCKING_DEBUG] {amrID}:")
             print(f"   currentGoalNodeID: {self.currentGoalNodeID}")
             print(f"   transportPhase: {self.transportPhase}")
@@ -569,11 +566,11 @@ class LocalPlanner(DEVSAtomicModel):
                 f"   Has _OUT: {'_OUT' in self.currentGoalNodeID if self.currentGoalNodeID else 'N/A'}")
 
             if not is_waiting_area:
-                # Equipment undocking - Maneuver에게 명령 전송
+                # undocking from a machine: send the command to Maneuver
                 equipmentID = self.currentGoalNodeID.split(
                     '_')[0] if self.currentGoalNodeID else None
 
-                # 장비의 outputPort 좌표 가져오기
+                # the machine's output-port coordinates
                 Equipment = self.globalVar.getEquipmentInfoByID(equipmentID)
                 Out_pos = Equipment.outputPort.get('position')
 
@@ -584,7 +581,7 @@ class LocalPlanner(DEVSAtomicModel):
                 print(f"   Equipment: {equipmentID}")
                 print(f"   Target outputPort: {Out_pos}")
 
-                # Maneuver에게 언도킹 명령 전송 (좌표 포함 - Maneuver가 설정함)
+                # Maneuver moves the robot to the coordinates carried in the command
                 undocking_message = MsgManeuverState(
                     self.ID.replace('_LPP', '_maneuver'),
                     Out_pos['x'],
@@ -592,14 +589,14 @@ class LocalPlanner(DEVSAtomicModel):
                 )
                 self.addOutputEvent("Undocking_O", undocking_message)
             else:
-                # WaitingArea - 현재 위치 고정 (멈춤)
+                # in a waiting area the robot simply holds its position
                 vehicleInfo = self.globalVar.getVehicleInfoByID(amrID)
                 if vehicleInfo:
                     current_coords = vehicleInfo.getCoordinates()
                     current_x = current_coords[0]
                     current_y = current_coords[1]
                 else:
-                    # 차량 정보가 없으면 WaitingArea 좌표 사용
+                    # with no vehicle record, fall back to the waiting-area coordinates
                     waitingArea = self.globalVar.getWaitingAreaInfoByID(
                         self.currentGoalNodeID)
                     if waitingArea:
@@ -614,7 +611,7 @@ class LocalPlanner(DEVSAtomicModel):
                 print(f"   WaitingArea: {self.currentGoalNodeID}")
                 print(f"   Stop position: ({current_x}, {current_y})")
 
-                # Maneuver에게 현재 위치 유지 명령 전송
+                # tell Maneuver to hold the current position
                 stop_message = MsgManeuverState(
                     self.ID.replace('_LPP', '_maneuver'),
                     current_x,
@@ -625,15 +622,15 @@ class LocalPlanner(DEVSAtomicModel):
         elif state == "Undocking_to_fleetmanagement":
             amrID = self.ID.split('_')[0]
 
-            # WaitingArea와 Equipment 구분
+            # distinguish a waiting area from a machine
             is_waiting_area = (self.currentGoalNodeID and
                                self.currentGoalNodeID.startswith('WAITING_AREA'))
 
             if is_waiting_area:
-                # WaitingArea: areaID 전달
+                # a waiting area reports its areaID
                 locationID = self.currentGoalNodeID
             else:
-                # Equipment: equipmentID 전달
+                # a machine reports its equipmentID
                 locationID = self.currentGoalNodeID.split(
                     '_')[0] if self.currentGoalNodeID else None
 
@@ -652,9 +649,9 @@ class LocalPlanner(DEVSAtomicModel):
         if state == "WAIT":
             return float('inf')
         elif state in ["SEND", "REPLAN"]:
-            return 0  # 즉시 출력
+            return 0  # emit at once
         elif state == "PLAN":
-            return 0.1  # 100ms마다 계획
+            return 0.1  # replan every 100 ms
         elif state == "UNDOCKING":
             return 1.0
         elif state == "Undocking_to_fleetmanagement":
@@ -663,44 +660,44 @@ class LocalPlanner(DEVSAtomicModel):
             return 1.0
 
     def calc_dwa(self):
-        """DWA 기반 지역 경로 계획"""
+        """Plan the local motion with DWA."""
         if not self.goal:
             return None
 
-        # 동적 장애물 정보 수집
+        # dynamic obstacles
         obstacle_positions = list(self.obstacles.values())
 
-        # 정적 장애물 정보 수집 (현재 목표 노드 제외)
+        # static obstacles, minus the current goal node
         static_polygons = self.get_static_obstacles_for_dwa()
 
-        # 현재 위치와 목표 사이의 거리
+        # distance to the goal
         current_pos = np.array(self.curPose[:2])
         goal_pos = np.array(self.goal)
         distance_to_goal = np.linalg.norm(goal_pos - current_pos)
 
-        # DWA 파라미터 설정
+        # DWA parameters
         dwa_params = {
             'max_speed': 1.5,
             'max_yawrate': np.pi / 3,
             'safety_margin': 2.0
         }
 
-        # 목표에 가까울 때 감속
+        # slow down near the goal
         if distance_to_goal < 5.0:
             dwa_params['max_speed'] *= 0.7
 
-        # 🔄 회피 모드일 때 파라미터 조정 (보수적으로)
+        # in avoidance mode the parameters are made more conservative
         if self.is_in_avoidance:
-            dwa_params['max_speed'] *= 0.8      # 속도 감소
-            dwa_params['max_yawrate'] *= 1.5    # 회전 유연성 증가
-            dwa_params['safety_margin'] *= 1.2  # 안전 마진 증가
+            dwa_params['max_speed'] *= 0.8      # lower the speed
+            dwa_params['max_yawrate'] *= 1.5    # allow more turning
+            dwa_params['safety_margin'] *= 1.2  # widen the safety margin
 
-        # DWA 실행 (정적 장애물 포함)
+        # run DWA, static obstacles included
         target_state = self.dwa.calc_dwa(
             self.curPose,
             self.goal,
-            np.array(obstacle_positions),  # 동적 장애물
-            static_polygons,  # 정적 장애물 (현재 목표 제외)
+            np.array(obstacle_positions),  # dynamic obstacles
+            static_polygons,  # static obstacles, current goal excluded
             **dwa_params
         )
 
@@ -713,9 +710,13 @@ class LocalPlanner(DEVSAtomicModel):
             return None
 
     def get_static_obstacles_for_dwa(self):
-        """DWA용 정적 장애물 가져오기 (현재 목표 노드와 시작 노드 제외) - 캐싱으로 성능 향상"""
+        """Collect the static obstacles for DWA.
 
-        # 제외할 노드 리스트 생성
+        The current goal and the previous machine are excluded. The result is
+        cached and reused for as long as the exclusion set is unchanged.
+        """
+
+        # build the exclusion list
         exclude_nodes = []
         if self.currentGoalNodeID:
             exclude_nodes.append(self.currentGoalNodeID)
@@ -723,13 +724,13 @@ class LocalPlanner(DEVSAtomicModel):
             start_nodeID = self.previousEquipmentID + '_OUT'
             exclude_nodes.append(start_nodeID)
 
-        # 캐시가 유효한지 확인 (제외 노드가 같으면 캐시 재사용)
+        # the cache is valid while the exclusion set is unchanged
         if (self.cached_static_polygons is not None and
                 self.cached_exclude_nodes == exclude_nodes):
-            # 캐시된 결과 재사용 (빠름!)
+            # reuse the cache
             return self.cached_static_polygons
 
-        # 캐시가 없거나 무효화됨 → 새로 생성
+        # no cache, or a stale one: rebuild
         if self.previousEquipmentID and self.cached_exclude_nodes != exclude_nodes:
             self.globalVar.printTerminal(
                 f"[{self.getTime()}][LocalPlanner] Rebuilding static obstacles cache (exclude: {exclude_nodes})"
@@ -738,12 +739,12 @@ class LocalPlanner(DEVSAtomicModel):
         obstacles = self.globalVar.getObstacleInfo()
         static_polygons = []
 
-        # 현재 위치와 목표 위치 (미리 계산)
+        # current pose and goal, computed once
         current_point = Point(self.curPose[0], self.curPose[1])
         goal_point = Point(self.goal[0], self.goal[1]) if self.goal else None
 
         for obs in obstacles:
-            # 현재 목표 노드는 장애물에서 제외
+            # the current goal is not treated as an obstacle
             if 'nodeID' in obs and obs['nodeID'] in exclude_nodes:
                 continue
 
@@ -755,7 +756,7 @@ class LocalPlanner(DEVSAtomicModel):
             y_min = pos['y'] - bbox['height'] / 2
             y_max = pos['y'] + bbox['height'] / 2
 
-            # Polygon 좌표 생성
+            # polygon coordinates
             polygon = Polygon([
                 (x_min, y_min),
                 (x_max, y_min),
@@ -763,24 +764,24 @@ class LocalPlanner(DEVSAtomicModel):
                 (x_min, y_max)
             ])
 
-            # 현재 위치가 장애물 안에 있으면 해당 폴리곤은 제외하여 탈출을 허용
+            # drop the polygon containing the robot, or it can never escape
             if polygon.contains(current_point):
                 continue
 
-            # 목표 지점이 장애물 안에 있으면 해당 폴리곤은 제외하여 진입을 허용
+            # drop the polygon containing the goal, or it can never be entered
             if goal_point and polygon.contains(goal_point):
                 continue
 
             static_polygons.append(polygon)
 
-        # 캐시 저장
+        # store in the cache
         self.cached_static_polygons = static_polygons
         self.cached_exclude_nodes = exclude_nodes.copy()
 
         return static_polygons
 
     def check_distance(self):
-        """현재 위치와 목표 위치 사이의 거리 계산"""
+        """Distance from the current pose to the goal."""
         if not self.curPose or not self.goal:
             return float('inf')
 
@@ -791,7 +792,7 @@ class LocalPlanner(DEVSAtomicModel):
         return distance
 
     def check_obstacle_distance(self):
-        """현재 위치와 가장 가까운 장애물 사이의 거리 계산"""
+        """Distance from the current pose to the nearest obstacle."""
         if not self.curPose or not self.obstacles:
             return float('inf')
 
@@ -807,7 +808,7 @@ class LocalPlanner(DEVSAtomicModel):
         return min_distance
 
     def check_agent_distance(self, agent_id):
-        """다른 에이전트와의 거리 계산"""
+        """Distance to another agent."""
         if not self.curPose or agent_id not in self.other_agents:
             return float('inf')
 
@@ -817,12 +818,7 @@ class LocalPlanner(DEVSAtomicModel):
         return np.linalg.norm(agent_position - current_position)
 
     def predict_collision_risk(self, agent_id):
-        """
-        다른 AMR과의 충돌 위험 예측 (속도 기반)
-
-        Returns:
-            bool: True이면 충돌 위험 있음
-        """
+        """Predict a collision with a peer robot from the relative velocity."""
         if agent_id not in self.other_agents:
             return False
 
@@ -835,64 +831,64 @@ class LocalPlanner(DEVSAtomicModel):
         other_vel = np.array(agent_data['vel'][:2]) if len(
             agent_data['vel']) >= 2 else np.array([0.0, 0.0])
 
-        # 상대 위치 및 속도
+        # relative position and velocity
         rel_pos = other_pos - my_pos
         rel_vel = other_vel - my_vel
 
-        # 거리
+        # distance
         distance = np.linalg.norm(rel_pos)
 
-        # 매우 가까우면 무조건 위험
+        # very close is always a risk
         if distance < self.collision_radius:
             return True
 
-        # 상대 속도가 거의 없으면 (정지 상태) 위험 없음
+        # with almost no relative motion there is no risk
         rel_speed = np.linalg.norm(rel_vel)
         if rel_speed < 0.1:
             return False
 
-        # 예측 시간 (3초)
+        # a 3 s prediction horizon
         prediction_time = 3.0
 
-        # 미래 위치 예측
+        # extrapolate the future positions
         my_future_pos = my_pos + my_vel * prediction_time
         other_future_pos = other_pos + other_vel * prediction_time
 
-        # 미래 거리 계산
+        # the future distance
         future_distance = np.linalg.norm(other_future_pos - my_future_pos)
 
-        # 미래에 더 가까워지면 충돌 위험
+        # closing in the future counts as a risk
         if future_distance < self.collision_radius:
             return True
 
-        # 접근 중인지 확인 (내적 이용)
-        # 상대 위치 벡터와 상대 속도 벡터의 내적이 음수면 접근 중
+        # the dot product tells us whether they are approaching
+        # a negative dot product means the two are closing
         if distance > 0:
             approaching = np.dot(rel_pos, rel_vel) < 0
 
-            # 접근 중이고 거리가 가까우면 위험
+            # closing and near: a risk
             if approaching and distance < self.safety_tolerance * 0.7:
                 return True
 
         return False
 
     def get_next_waypoint(self):
-        """경로에서 다음 waypoint 가져오기"""
+        """Take the next waypoint from the path."""
         if not self.path or len(self.path) <= 1:
             return None
 
-        # 현재 goal과 가장 가까운 waypoint의 인덱스 찾기
+        # index of the waypoint closest to the current goal
         current_idx = self.find_current_waypoint_index()
 
         if current_idx is not None and current_idx < len(self.path) - 1:
-            # 다음 waypoint 반환
+            # the one after it
             next_wp = self.path[current_idx + 1]
             return (next_wp[0], next_wp[1])
 
         return None
 
     def find_current_waypoint_index(self):
-        """현재 goal이 path에서 몇 번째 waypoint인지 찾기"""
+        """Find which waypoint of the path the current goal corresponds to."""
         if not self.path or not self.goal:
             return None
 
@@ -902,54 +898,53 @@ class LocalPlanner(DEVSAtomicModel):
             wp_array = np.array([waypoint[0], waypoint[1]])
             distance = np.linalg.norm(goal_array - wp_array)
 
-            # 거리가 1.0 미만이면 같은 지점으로 판정
+            # closer than 1.0 counts as the same point
             if distance < 1.0:
                 return i
 
-        # 못 찾으면 첫 번째 waypoint로 간주
+        # not found: assume the first waypoint
         return 0
 
     def replan_check(self):
-        """
-        목표까지의 거리 개선 여부를 추적하여 재계획 필요성 판단
+        """Decide whether to replan, by tracking progress towards the goal.
 
-        Returns:
-            bool: True이면 재계획 필요, False이면 계속 진행
+        Returns True when neither the distance nor the position has changed
+        appreciably for long enough, which indicates a deadlock or oscillation.
         """
         current_time = self.getTime()
         current_position = np.array(self.curPose[:2])
         current_distance = self.check_distance()
 
-        # 체크 시작 (초기화)
+        # start tracking
         if self.replan_check_start_time is None:
             self.replan_check_start_time = current_time
             self.replan_check_initial_distance = current_distance
             self.replan_check_initial_position = current_position.copy()
             return False
 
-        # 경과 시간 계산
+        # elapsed time
         elapsed_time = current_time - self.replan_check_start_time
 
-        # 임계 시간이 지났는지 확인
+        # has the threshold been passed?
         if elapsed_time >= self.replan_check_threshold_time:
-            # 거리 개선도 계산
+            # how much closer we got
             distance_improved = self.replan_check_initial_distance - current_distance
 
-            # 위치 이동량 계산
+            # how far we moved
             position_movement = np.linalg.norm(
                 current_position - self.replan_check_initial_position
             )
 
-            # 진전도 판단
+            # progress test
             needs_replan = False
             reason = ""
 
-            # 조건 1: 거리가 충분히 개선되지 않음
+            # condition 1: the distance did not close enough
             if distance_improved < self.replan_check_distance_improvement:
                 needs_replan = True
                 reason = f"거리 개선 부족 (개선: {distance_improved:.2f}m < 필요: {self.replan_check_distance_improvement}m)"
 
-            # 조건 2: 위치가 거의 변하지 않음 (제자리 맴돌기)
+            # condition 2: the robot barely moved, so it is circling in place
             if position_movement < self.replan_check_position_movement:
                 needs_replan = True
                 reason += f" / 위치 이동 부족 (이동: {position_movement:.2f}m < 필요: {self.replan_check_position_movement}m)"
@@ -961,11 +956,11 @@ class LocalPlanner(DEVSAtomicModel):
                 self.globalVar.printTerminal(
                     f"   경과시간: {elapsed_time:.1f}초, 초기거리: {self.replan_check_initial_distance:.2f}m → 현재거리: {current_distance:.2f}m"
                 )
-                # 상태 리셋
+                # reset the tracking
                 self.reset_replan_check()
                 return True
             else:
-                # 충분히 개선되었으면 체크 상태 리셋하여 다시 추적 시작
+                # enough progress: re-anchor the tracking
                 self.globalVar.printTerminal(
                     f"[{current_time}][LocalPlanner({self.ID})] ✅ 진전 있음: 거리 {distance_improved:.2f}m 개선, {position_movement:.2f}m 이동"
                 )
@@ -975,7 +970,7 @@ class LocalPlanner(DEVSAtomicModel):
         return False
 
     def reset_replan_check(self):
-        """재계획 체크 상태 초기화"""
+        """Reset the progress tracking."""
         self.replan_check_start_time = None
         self.replan_check_initial_distance = None
         self.replan_check_initial_position = None

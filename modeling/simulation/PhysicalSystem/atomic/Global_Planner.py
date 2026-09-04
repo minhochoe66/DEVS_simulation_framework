@@ -20,62 +20,62 @@ class GlobalPlanner(DEVSAtomicModel):
         self.globalVar = globalVar
         self.algorithm = algorithm
 
-        # 환경 정보
+        # Environment
         self.map_width = 100
         self.map_height = 100
         self.obstacles = []
 
         self.AMR_Global_Planner_ID = ID
 
-        # AMR 및 작업 정보
+        # Robot and job state
         self.amr_id = None
         self.amr_position = None
         self.amr_yaw = None
         self.amr_velocity = None
         self.task_id = None
-        self.task_from = None  # TransportCommand의 From 위치 (Equipment IN)
-        self.task_to = None    # TransportCommand의 To 위치 (Equipment IN)
-        self.task_from_nodeID = None  # From Equipment의 NodeID
-        self.task_to_nodeID = None    # To Equipment의 NodeID
+        self.task_from = None  # pickup position from the transport command (equipment IN)
+        self.task_to = None    # destination position from the transport command (equipment IN)
+        self.task_from_nodeID = None  # node ID of the pickup machine
+        self.task_to_nodeID = None    # node ID of the destination machine
         self.planned_path = []
         self.path = []
         self.start = None
 
-        # Transport Phase 관리
-        # "TO_FROM": From Equipment로 이동 중
-        # "AT_FROM": From Equipment 도착 (픽업 대기)
-        # "TO_DESTINATION": To Equipment로 이동 중
-        # "AT_DESTINATION": To Equipment 도착 (하역 완료)
+        # Transport phase
+        # TO_FROM:        driving to the pickup machine
+        # AT_FROM:        at the pickup machine, waiting to load
+        # TO_DESTINATION: driving to the destination machine
+        # AT_DESTINATION: at the destination machine, unloaded
         self.transportPhase = None
-        self.currentGoal = None  # 현재 단계의 목표 위치
-        self.currentGoalNodeID = None  # 현재 단계의 목표 NodeID
+        self.currentGoal = None  # goal position of the current phase
+        self.currentGoalNodeID = None  # goal node ID of the current phase
 
-        # 장애물 전처리 캐싱 (성능 향상)
-        self.cached_obstacle_polygons = None  # Shapely Polygon 객체 캐시
-        self.cached_expanded_polygons = None  # Buffer 적용된 Polygon 캐시
+        # Cached obstacle geometry
+        self.cached_obstacle_polygons = None  # cached shapely polygons
+        self.cached_expanded_polygons = None  # cached polygons with the safety margin applied
         self.cache_safety_margin = 3.0
 
-        # 장애물 정보를 한 번만 전처리 (시뮬레이션 시작 시)
+        # the obstacles are preprocessed once, at start-up
         self._preprocess_obstacles()
 
-        # 상태 변수 정의
+        # State variable
         self.addStateVariable("state", "INIT")
 
-        # 입출력 포트 정의
-        self.addInputPort("Task_I")           # 작업 정보 수신
-        # FleetManagement로부터 단순 이동 명령 (jobID 없음)
+        # Ports
+        self.addInputPort("Task_I")           # transport order
+        # bare move command, no jobID
         self.addInputPort("amrGoCommand")
-        self.addInputPort("ManeuverState_I")  # AMR 위치 정보 수신
-        self.addInputPort("Replan")           # 재계획 요청
-        self.addInputPort("StopSim")          # 시뮬레이션 중지
+        self.addInputPort("ManeuverState_I")  # AMR pose
+        self.addInputPort("Replan")           # replan request
+        self.addInputPort("StopSim")          # stop the simulation
 
-        self.addOutputPort("GlobalWaypoint_O")  # Waypoint 전송
-        self.addOutputPort("RequestManeuver")   # Maneuver 요청
+        self.addOutputPort("GlobalWaypoint_O")  # emit the waypoints
+        self.addOutputPort("RequestManeuver")   # request to Maneuver
 
     def funcExternalTransition(self, strPort, objEvent):
         state = self.getStateValue("state")
 
-        # Docking 완료 신호 - 작업 완료 후 대기 상태로
+        # docking complete: the job is done, go back to waiting
         if strPort == "Docking_I":
             self.setStateValue("state", "WAIT")
             self.globalVar.printTerminal(
@@ -84,9 +84,9 @@ class GlobalPlanner(DEVSAtomicModel):
             return
         if strPort == "Undocking_I":
             self.setStateValue("state", "WAIT")
-        # 🚨 amrGoCommand는 모든 상태에서 처리 (긴급 "비켜라" 명령)
+        # amrGoCommand is a give-way order, accepted in any state
         if strPort == "amrGoCommand":
-            # FleetManagement로부터 단순 이동 명령 (jobID 없음)
+            # bare move command from FleetManagement, with no jobID
             if self.ID.split('_', 1)[0] == objEvent['amrID'].split('_', 1)[0]:
                 planner_vehicle_id = self.ID.split('_')[0]
                 task_vehicle_id = objEvent['amrID'].split('_')[0] if isinstance(
@@ -96,21 +96,21 @@ class GlobalPlanner(DEVSAtomicModel):
                     action = objEvent.get('action', 'GO')
 
                     if action == 'GO_WAITING':
-                        # WaitingArea로 이동
+                        # head for a waiting area
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] 🚨 EMERGENCY GO_WAITING Command (State: {state}) for AMR {objEvent['amrID']}"
                         )
 
-                        # Task 정보 추출 (jobID 없음)
+                        # read the goal out of the command
                         self.amr_id = objEvent['amrID']
-                        self.task_id = None  # jobID 없음
+                        self.task_id = None  # no jobID
 
-                        # 목표 위치만 설정
+                        # only the goal position is set
                         target_x = objEvent['x']
                         target_y = objEvent['y']
                         areaID = objEvent.get('areaID', None)
 
-                        # AMR 현재 위치를 시작점으로
+                        # plan from the robot's current position
                         vehicleInfo = self.globalVar.getVehicleInfoByID(
                             self.amr_id)
                         if vehicleInfo:
@@ -118,12 +118,12 @@ class GlobalPlanner(DEVSAtomicModel):
                             self.amr_position = (
                                 latest_coords[0], latest_coords[1])
 
-                        self.task_from = self.amr_position  # 현재 위치
-                        self.task_to = (target_x, target_y)  # 목표 위치
-                        self.task_from_nodeID = None  # NodeID 없음
-                        self.task_to_nodeID = None  # NodeID 없음
+                        self.task_from = self.amr_position  # current position
+                        self.task_to = (target_x, target_y)  # goal position
+                        self.task_from_nodeID = None  # no node ID
+                        self.task_to_nodeID = None  # no node ID
 
-                        # WAITING phase 설정
+                        # enter the WAITING phase
                         self.transportPhase = "WAITING"
                         self.currentGoal = self.task_to
                         self.currentGoalNodeID = areaID  # WaitingArea ID
@@ -132,24 +132,24 @@ class GlobalPlanner(DEVSAtomicModel):
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] GO_WAITING Command: Move to WaitingArea {areaID} at ({target_x}, {target_y})"
                         )
 
-                        # 경로 계획 모드로 전환
+                        # switch to planning
                         self.setStateValue("state", "GPP")
-                        return  # 즉시 처리
+                        return  # act immediately
                     else:
-                        # 일반 GO 명령
+                        # an ordinary move command
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] 🚨 EMERGENCY GO Command (State: {state}) for AMR {objEvent['amrID']}"
                         )
 
-                        # Task 정보 추출 (jobID 없음)
+                        # read the goal out of the command
                         self.amr_id = objEvent['amrID']
-                        self.task_id = None  # jobID 없음
+                        self.task_id = None  # no jobID
 
-                        # 목표 위치만 설정 (현재 위치 → 목표 위치)
+                        # plan only from here to the goal
                         target_x = objEvent['x']
                         target_y = objEvent['y']
 
-                        # AMR 현재 위치를 시작점으로
+                        # plan from the robot's current position
                         vehicleInfo = self.globalVar.getVehicleInfoByID(
                             self.amr_id)
                         if vehicleInfo:
@@ -157,10 +157,10 @@ class GlobalPlanner(DEVSAtomicModel):
                             self.amr_position = (
                                 latest_coords[0], latest_coords[1])
 
-                        self.task_from = self.amr_position  # 현재 위치
-                        self.task_to = (target_x, target_y)  # 목표 위치
-                        self.task_from_nodeID = None  # NodeID 없음
-                        self.task_to_nodeID = None  # NodeID 없음
+                        self.task_from = self.amr_position  # current position
+                        self.task_to = (target_x, target_y)  # goal position
+                        self.task_from_nodeID = None  # no node ID
+                        self.task_to_nodeID = None  # no node ID
 
                         self.globalVar.printTerminal(
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] GO Command: Move to ({target_x}, {target_y})"
@@ -169,7 +169,7 @@ class GlobalPlanner(DEVSAtomicModel):
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] Current position: {self.amr_position}"
                         )
 
-                        # 단순 이동 (Transport Phase 없음)
+                        # a bare move has no transport phase
                         self.transportPhase = None
                         self.currentGoal = self.task_to
                         self.currentGoalNodeID = None
@@ -178,15 +178,15 @@ class GlobalPlanner(DEVSAtomicModel):
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] GO Command - Simple movement (no job)"
                         )
 
-                        # 경로 계획 모드로 전환
+                        # switch to planning
                         self.setStateValue("state", "GPP")
-                        return  # 즉시 처리
+                        return  # act immediately
                 else:
-                    # 다른 AMR의 작업이면 무시
+                    # ignore commands addressed to another AMR
                     self.continueTimeAdvance()
-            return  # amrGoCommand 처리 완료
+            return  # amrGoCommand handled
 
-        # INIT 또는 WAIT 상태에서만 새로운 Task 받음
+        # a new job is accepted only in INIT or WAIT
         if state == "INIT" or state == "WAIT":
             if strPort == "Task_I":
                 if self.ID.split('_', 1)[0] == objEvent['amrID'].split('_', 1)[0]:
@@ -199,11 +199,11 @@ class GlobalPlanner(DEVSAtomicModel):
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] Received TransportCommand for Job #{objEvent['jobID']}"
                         )
 
-                        # Task 정보 추출
+                        # read the job
                         self.amr_id = objEvent['amrID']
                         self.task_id = objEvent['jobID']
 
-                        # From-To 정보 저장 (위치 + NodeID)
+                        # store the pickup and destination, both position and node ID
                         fromPos = objEvent['fromPosition']
                         toPos = objEvent['toPosition']
                         self.task_from = (fromPos['x'], fromPos['y'])
@@ -218,16 +218,16 @@ class GlobalPlanner(DEVSAtomicModel):
                             f"[{self.getTime()}][GlobalPlanner({self.ID})] Coordinates: From {self.task_from} → To {self.task_to}"
                         )
 
-                        # Transport action에 따라 단계 결정
+                        # the transport action decides which phase to start in
                         action = objEvent.get('action', 'TRANSPORT')
 
                         if action == 'TRANSPORT_NEXT':
-                            # 언도킹 후 다음 목적지로 이동 - 바로 TO_DESTINATION 단계
+                            # after undocking, go straight to the TO_DESTINATION phase
                             self.transportPhase = "TO_DESTINATION"
                             self.currentGoal = self.task_to
                             self.currentGoalNodeID = self.task_to_nodeID
 
-                            # UNDOCKING 후 AMR 위치를 최신으로 업데이트
+                            # refresh the robot pose after undocking
                             amrID = objEvent['amrID']
                             vehicleInfo = self.globalVar.getVehicleInfoByID(
                                 amrID)
@@ -248,7 +248,7 @@ class GlobalPlanner(DEVSAtomicModel):
                                 f"[{self.getTime()}][GlobalPlanner({self.ID})] Phase: TO_DESTINATION - Moving to next destination (UNDOCKING complete)"
                             )
                         else:
-                            # 일반 Transport - From Equipment로 이동 시작
+                            # an ordinary transport heads for the pickup machine first
                             self.transportPhase = "TO_FROM"
                             self.currentGoal = self.task_from
                             self.currentGoalNodeID = self.task_from_nodeID
@@ -257,14 +257,14 @@ class GlobalPlanner(DEVSAtomicModel):
                                 f"[{self.getTime()}][GlobalPlanner({self.ID})] Phase: TO_FROM - Moving to pickup location"
                             )
 
-                        # 경로 계획 모드로 전환
+                        # switch to planning
                         self.setStateValue("state", "GPP")
                     else:
-                        # 다른 AMR의 작업이면 무시
+                        # ignore jobs addressed to another AMR
                         self.continueTimeAdvance()
             elif strPort == "Replan":
-                # LocalPlanner로부터 재계획 요청
-                # Vehicle 번호 비교
+                # replan request from Local_Planner
+                # compare the vehicle numbers
 
                 amr_base_id = objEvent.strID.split(
                     '_')[0] if hasattr(objEvent, 'strID') else None
@@ -280,23 +280,23 @@ class GlobalPlanner(DEVSAtomicModel):
                     )
 
             elif strPort == "ManeuverState_I":
-                # AMR 위치 정보 업데이트
+                # update the AMR pose
                 if self.ID.split('_', 1)[0] == objEvent.strID:
                     self.update_data(objEvent)
                 else:
                     self.continueTimeAdvance()
 
-        # PLAN 상태: 이동 중이므로 Task_I 무시, Replan과 ManeuverState_I만 처리
+        # while in PLAN the robot is driving, so only Replan and ManeuverState_I are handled
         elif state == "PLAN":
             if strPort == "Task_I":
-                # 이동 중이므로 새로운 Task 무시
+                # a new job is ignored while driving
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][GlobalPlanner({self.ID})] BUSY - Ignoring new task (currently in PLAN state)"
                 )
                 self.continueTimeAdvance()
 
             elif strPort == "Replan":
-                # LocalPlanner로부터 재계획 요청
+                # replan request from Local_Planner
                 amr_base_id = objEvent.strID.split(
                     '_')[0] if hasattr(objEvent, 'strID') else None
                 planner_base_id = self.ID.split('_')[0]
@@ -311,15 +311,15 @@ class GlobalPlanner(DEVSAtomicModel):
                     )
 
             elif strPort == "ManeuverState_I":
-                # AMR 위치 정보 업데이트
+                # update the AMR pose
                 if self.ID.split('_', 1)[0] == objEvent.strID:
                     self.update_data(objEvent)
                 else:
                     self.continueTimeAdvance()
 
-        # 기타 상태: ManeuverState_I만 처리
+        # in any other state, only ManeuverState_I is handled
         elif strPort == "ManeuverState_I":
-            # 모든 상태에서 위치 정보 업데이트
+            # the pose is updated in every state
             if self.ID.split('_', 1)[0] == objEvent.strID:
                 self.update_data(objEvent)
             else:
@@ -329,21 +329,21 @@ class GlobalPlanner(DEVSAtomicModel):
         state = self.getStateValue("state")
 
         if state == "GPP" and self.currentGoal is not None:
-            # 경로 계획 수행
+            # plan the path
             if self.amr_position and self.currentGoal:
-                # 현재 목표 노드와 시작점 노드를 제외한 장애물 정보 가져오기
+                # exclude the goal and start nodes from the obstacle set
                 exclude_nodes = []
 
-                # 목표 노드 제외 (WaitingArea 포함)
+                # exclude the goal node, waiting areas included
                 if self.currentGoalNodeID:
                     exclude_nodes.append(self.currentGoalNodeID)
-                    # WaitingArea 계열은 prefix만 동일해도 제외 보장
+                    # for waiting areas, a matching prefix is enough to exclude
                     if isinstance(self.currentGoalNodeID, str) and self.currentGoalNodeID.startswith('WAITING_AREA'):
                         exclude_nodes.append(self.currentGoalNodeID)
 
-                # 시작점 노드 제외 (현재 AMR이 있는 장비의 outputPort)
+                # exclude the start node: the output port of the machine the robot sits at
                 if self.transportPhase == "TO_DESTINATION" and self.task_from_nodeID:
-                    # TO_DESTINATION 단계에서는 이전 장비의 outputPort에서 시작
+                    # in TO_DESTINATION the robot departs from the previous machine's output port
                     start_nodeID = self.task_from_nodeID.replace('_IN', '_OUT')
                     exclude_nodes.append(start_nodeID)
                     self.globalVar.printTerminal(
@@ -351,7 +351,7 @@ class GlobalPlanner(DEVSAtomicModel):
                     )
 
                 start_time = time.time()
-                # 경로 계획 실행 (캐시된 장애물 사용 - 최적화)
+                # plan against the cached obstacles
                 self.planned_path = self.generate_path_with_cached_obstacles(
                     self.amr_position,
                     self.currentGoal,
@@ -369,24 +369,24 @@ class GlobalPlanner(DEVSAtomicModel):
                     f"[{self.getTime()}][GlobalPlanner] Phase: {self.transportPhase} - Path to {phase_name} planned with {len(self.planned_path)} waypoints")
 
                 if not self.planned_path:
-                    # 경로를 찾지 못한 경우 직선 경로
+                    # with no path found, fall back to a straight line
                     print(
                         f"[GlobalPlanner] No path found to {phase_name}, using direct path")
                     self.planned_path = [
                         (self.currentGoal[0], self.currentGoal[1])]
 
-                # 경로 전송 상태로 변경
+                # switch to emitting the path
                 self.setStateValue("state", "SEND_PATH")
 
         elif state == "SEND_PATH":
-            # 출력 후 PLAN 상태로 변경
+            # after the output, move to PLAN
             self.setStateValue("state", "PLAN")
 
     def funcOutput(self):
         state = self.getStateValue("state")
 
         if state == "SEND_PATH" and self.planned_path and len(self.planned_path) > 0:
-            # 첫 번째 waypoint 전송
+            # emit the first waypoint
             first_waypoint = self.planned_path[0]
             x, y = first_waypoint[0], first_waypoint[1]
 
@@ -394,45 +394,45 @@ class GlobalPlanner(DEVSAtomicModel):
             print(
                 f"[{self.getTime()}][GlobalPlanner] Sending waypoint: ({x}, {y}) - Phase: {phase_name}")
 
-            # 메시지 객체 생성 (transportPhase + goalNodeID 포함)
+            # the message carries the transport phase and the goal node ID
             objRequestMessage = MsgManeuverState(
                 self.ID.split('_', 1)[0] + '_maneuver_amr',
                 x,  # dblPositionX
                 y,  # dblPositionY
-                path=self.planned_path,  # 전체 경로
+                path=self.planned_path,  # the whole path
                 transportPhase=self.transportPhase,  # "TO_FROM" or "TO_DESTINATION"
-                goalNodeID=self.currentGoalNodeID  # 현재 목표 NodeID
+                goalNodeID=self.currentGoalNodeID  # current goal node ID
             )
 
-            # 메시지 전송
+            # emit
             self.addOutputEvent("GlobalWaypoint_O", objRequestMessage)
 
     def funcTimeAdvance(self):
         state = self.getStateValue("state")
 
         if state == "INIT":
-            return float('inf')  # 첫 Task 대기
+            return float('inf')  # waiting for the first job
         elif state == "WAIT":
-            return float('inf')  # 다음 Task 대기
+            return float('inf')  # waiting for the next job
         elif state == "GPP":
-            return 0  # 즉시 경로 계획 실행
+            return 0  # plan at once
         elif state == "SEND_PATH":
-            return 0  # 즉시 경로 전송
+            return 0  # emit at once
         elif state == "PLAN":
-            return float('inf')  # AMR 이동 중
+            return float('inf')  # the robot is driving
         else:
             return 1
 
     def extract_vehicle_number(self, id_string):
-        """Vehicle 뒤의 숫자 추출"""
+        """Extract the vehicle number from a model ID."""
         match = re.search(r'Vehicle(\d+)', id_string)
         if match:
             return match.group(1)
         return None
 
     def update_data(self, objEvent):
-        """AMR 위치 및 상태 정보 업데이트"""
-        # 위치 정보 업데이트
+        """Update the robot's pose and state."""
+        # update the pose
         if hasattr(objEvent, 'x') and hasattr(objEvent, 'y'):
             self.amr_position = (objEvent.x, objEvent.y)
             print(
@@ -441,33 +441,33 @@ class GlobalPlanner(DEVSAtomicModel):
             if hasattr(objEvent, 'strID'):
                 self.amr_id = objEvent.strID
 
-            # 경로 계획 필요 여부 확인
+            # decide whether a replan is needed
             if self.getStateValue("state") == "GPP" and self.task_goal and not self.planned_path:
                 print(
                     f"[{self.getTime()}][GlobalPlanner] Position received, ready for path planning")
 
-        # 추가 정보 추출
+        # additional fields
         if hasattr(objEvent, 'yaw'):
             self.amr_yaw = objEvent.yaw
         if hasattr(objEvent, 'lin_vel'):
             self.amr_velocity = objEvent.lin_vel
 
     def _preprocess_obstacles(self):
-        """
-        시뮬레이션 시작 시 모든 장애물을 한 번만 전처리
-        - Shapely Polygon 객체 생성 및 캐싱
-        - Safety margin 적용된 확장 Polygon 생성
+        """Preprocess every obstacle once, at start-up.
+
+        Builds and caches the shapely polygons, together with the inflated
+        versions that carry the safety margin.
         """
         obstacles = self.globalVar.getObstacleInfo()
 
-        # 1. 기본 Polygon 객체 생성
+        # 1. the plain polygons
         obstacle_polygons = []
         for obs in obstacles:
             pos = obs['position']
             bbox = obs['boundingBox']
             node_id = obs.get('nodeID', None)
 
-            # WaitingArea는 장애물로 취급하지 않음
+            # waiting areas are not obstacles
             if node_id and isinstance(node_id, str) and node_id.startswith('WAITING_AREA'):
                 continue
 
@@ -483,7 +483,7 @@ class GlobalPlanner(DEVSAtomicModel):
                 (x_min, y_max)
             ])
 
-            # nodeID도 함께 저장 (제외용)
+            # keep the node ID too, for the exclusion test
             obstacle_polygons.append({
                 'polygon': polygon,
                 'nodeID': node_id
@@ -491,7 +491,7 @@ class GlobalPlanner(DEVSAtomicModel):
 
         self.cached_obstacle_polygons = obstacle_polygons
 
-        # 2. Safety margin 적용된 확장 Polygon 생성
+        # 2. the polygons inflated by the safety margin
         expanded_polygons = []
         for obs_data in obstacle_polygons:
             expanded = obs_data['polygon'].buffer(self.cache_safety_margin)
@@ -506,11 +506,10 @@ class GlobalPlanner(DEVSAtomicModel):
             f"[GlobalPlanner] Preprocessed {len(obstacle_polygons)} obstacles (cached)")
 
     def get_obstacle_polygons(self, exclude_nodes=None):
-        """
-        GlobalVar에서 장애물 정보 가져오기
+        """Read the obstacles from GlobalVar.
 
-        Args:
-            exclude_nodes: 제외할 nodeID 리스트 (현재 목표 노드는 장애물에서 제외)
+        Node IDs listed in exclude_nodes are dropped: leaving the current goal
+        in the obstacle set would make it unreachable.
         """
         obstacles = self.globalVar.getObstacleInfo()
         obstacle_polygons = []
@@ -519,14 +518,14 @@ class GlobalPlanner(DEVSAtomicModel):
             exclude_nodes = []
 
         for obs in obstacles:
-            # 현재 목표 노드는 장애물에서 제외
+            # the current goal is not treated as an obstacle
             if 'nodeID' in obs and obs['nodeID'] in exclude_nodes:
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][GlobalPlanner] Excluding target node {obs['nodeID']} from obstacles"
                 )
                 continue
 
-            # WaitingArea는 장애물로 취급하지 않음
+            # waiting areas are not obstacles
             node_id = obs.get('nodeID', None)
             if node_id and isinstance(node_id, str) and node_id.startswith('WAITING_AREA'):
                 continue
@@ -539,7 +538,7 @@ class GlobalPlanner(DEVSAtomicModel):
             y_min = pos['y'] - bbox['height'] / 2
             y_max = pos['y'] + bbox['height'] / 2
 
-            # 좌표 리스트로 변환 (Shapely Polygon 변환용)
+            # convert to a coordinate list, ready for shapely
             polygon_coords = [
                 (x_min, y_min),
                 (x_max, y_min),
@@ -551,21 +550,19 @@ class GlobalPlanner(DEVSAtomicModel):
         return obstacle_polygons
 
     def generate_path_with_cached_obstacles(self, start, goal, exclude_nodes=None):
-        """
-        캐시된 장애물로 경로 생성 (최적화 버전)
-        """
+        """Build the global path using the cached obstacles."""
         if exclude_nodes is None:
             exclude_nodes = []
 
-        # 캐시된 확장 폴리곤 사용 (제외 노드 필터링)
+        # use the cached inflated polygons, minus the excluded nodes
         expanded_polygons = []
         for obs_data in self.cached_expanded_polygons:
-            # 제외할 노드는 스킵
+            # skip the excluded nodes
             if obs_data['nodeID'] and obs_data['nodeID'] in exclude_nodes:
                 continue
             expanded_polygons.append(obs_data['polygon'])
 
-        # 시작점이 포함된 확장 장애물은 제거하여 경로계획을 진행
+        # an inflated obstacle containing the start point must be dropped, or planning fails
         start_point = Point(start)
         cleaned_expanded = []
         for polygon in expanded_polygons:
@@ -573,15 +570,15 @@ class GlobalPlanner(DEVSAtomicModel):
                 cleaned_expanded.append(polygon)
         expanded_polygons = cleaned_expanded
 
-        # ✅ 최적화: 먼저 직선 경로가 가능한지 체크 (매우 빠름!)
+        # if a straight line is clear, skip the search entirely
         if line_of_sight(start, goal, expanded_polygons):
             self.globalVar.printTerminal(
                 f"[{self.getTime()}][GlobalPlanner] Direct path available, skipping pathfinding"
             )
-            self.path = [goal]  # 목표점만 반환
+            self.path = [goal]  # return just the goal
             return self.path
 
-        # 경로 계획 알고리즘 선택
+        # select the planning algorithm
         raw_path = None
         if self.algorithm == "A_star":
             raw_path = A_star(start, goal, expanded_polygons)
@@ -593,21 +590,21 @@ class GlobalPlanner(DEVSAtomicModel):
         elif self.algorithm == "Theta_star":
             raw_path = Theta_star(start, goal, expanded_polygons)
         else:
-            # 기본: 직선 경로
+            # the default is a straight line
             raw_path = [start, goal]
 
         if raw_path:
-            # Line of Sight를 이용한 경로 단순화
+            # shorten the path with line-of-sight checks
             simplified_path = simplify_path_with_los(
                 raw_path, expanded_polygons)
 
-            # 시작점 제외 (첫 waypoint부터 전송)
+            # drop the start point; emit from the first waypoint on
             if len(simplified_path) == 1:
                 self.path = simplified_path
             else:
                 self.path = simplified_path[1:]
 
-            # # 경로 시각화 (활성화)
+            # # path visualisation
             # self.plot_path_with_terrain(
             #     start, goal, simplified_path, expanded_polygons)
             return self.path
@@ -616,33 +613,32 @@ class GlobalPlanner(DEVSAtomicModel):
             return []
 
     def generate_path(self, start, goal, terrain_polygons):
-        """경로 생성 (기존 호환성 유지 - 하지만 캐시 사용)"""
-        # 이 함수는 get_obstacle_polygons에서 호출되므로
-        # exclude_nodes 정보를 terrain_polygons에서 유추해야 함
-        # 하지만 더 나은 방법은 직접 exclude_nodes를 전달하는 것
+        """Build the global path. Compatibility path, not using the cache."""
+        # this is reached via get_obstacle_polygons, so exclude_nodes has to be
+        # inferred from terrain_polygons; passing it in directly would be better
 
-        # terrain_polygons를 Shapely Polygon 객체로 변환
+        # convert terrain_polygons to shapely polygons
         polygons = [Polygon(p) for p in terrain_polygons]
 
-        # 안전 마진 추가
+        # apply the safety margin
         safety_margin = 3.0
         expanded_polygons = []
         for polygon in polygons:
             expanded_polygons.append(polygon.buffer(safety_margin))
 
-        # 시작점이 장애물 내부에 있는지 확인
+        # is the start point inside an obstacle?
         start_point = Point(start)
         goal_point = Point(goal)
 
-        # 시작점이 포함된 확장 장애물은 제거하여 경로계획을 진행
+        # an inflated obstacle containing the start point must be dropped, or planning fails
         cleaned_expanded = []
         for polygon in expanded_polygons:
             if not polygon.contains(start_point):
                 cleaned_expanded.append(polygon)
         expanded_polygons = cleaned_expanded
-        # goal_point는 체크하지 않음 - exclude_nodes로 이미 제외됨
+        # the goal needs no check: exclude_nodes has already removed it
 
-        # 경로 계획 알고리즘 선택
+        # select the planning algorithm
         raw_path = None
         if self.algorithm == "A_star":
             raw_path = A_star(start, goal, expanded_polygons)
@@ -653,15 +649,15 @@ class GlobalPlanner(DEVSAtomicModel):
         elif self.algorithm == "Theta_star":
             raw_path = Theta_star(start, goal, expanded_polygons)
         else:
-            # 기본: 직선 경로
+            # the default is a straight line
             raw_path = [start, goal]
 
         if raw_path:
-            # Line of Sight를 이용한 경로 단순화
+            # shorten the path with line-of-sight checks
             simplified_path = simplify_path_with_los(
                 raw_path, expanded_polygons)
 
-            # 시작점 제외 (첫 waypoint부터 전송)
+            # drop the start point; emit from the first waypoint on
             if len(simplified_path) == 1:
                 self.path = simplified_path
             else:
@@ -676,23 +672,23 @@ class GlobalPlanner(DEVSAtomicModel):
             return []
 
     def plot_path_with_terrain(self, start, goal, path, terrain_polygons):
-        """경로 시각화 (Shapely Polygon 지원) - 전체 맵 크기 자동 계산"""
+        """Plot the path, deriving the map extent from the coordinates."""
         fig, ax = plt.subplots(figsize=(14, 10))
 
-        # 전체 맵 범위 계산을 위한 좌표 수집
+        # gather the coordinates, to size the view
         all_x = []
         all_y = []
 
-        # 장애물 그리기 (Shapely Polygon → matplotlib Polygon 변환)
+        # draw the obstacles
         for polygon in terrain_polygons:
-            # Shapely Polygon인 경우 좌표 추출
+            # a shapely polygon: take its coordinates
             if isinstance(polygon, Polygon):
                 coords = list(polygon.exterior.coords)
             else:
-                # 이미 좌표 리스트인 경우 그대로 사용
+                # already a coordinate list: use it as is
                 coords = polygon
 
-            # 좌표 수집
+            # collect the coordinates
             for coord in coords:
                 all_x.append(coord[0])
                 all_y.append(coord[1])
@@ -706,13 +702,13 @@ class GlobalPlanner(DEVSAtomicModel):
             )
             ax.add_patch(poly_patch)
 
-        # 시작점/목표점
+        # start and goal
         ax.plot(start[0], start[1], 'go', markersize=10, label='Start')
         ax.plot(goal[0], goal[1], 'ro', markersize=10, label='Goal')
         all_x.extend([start[0], goal[0]])
         all_y.extend([start[1], goal[1]])
 
-        # 경로
+        # the path
         if path:
             path_array = np.array(path)
             ax.plot(path_array[:, 0], path_array[:, 1],
@@ -720,7 +716,7 @@ class GlobalPlanner(DEVSAtomicModel):
             all_x.extend(path_array[:, 0].tolist())
             all_y.extend(path_array[:, 1].tolist())
 
-        # 전체 맵 범위 계산 (여유 공간 5.0 추가 - visualize.py와 동일)
+        # view extent, with the same 5.0 margin visualize.py uses
         if all_x and all_y:
             min_x, max_x = min(all_x), max(all_x)
             min_y, max_y = min(all_y), max(all_y)
@@ -728,7 +724,7 @@ class GlobalPlanner(DEVSAtomicModel):
             ax.set_xlim(min_x - margin, max_x + margin)
             ax.set_ylim(min_y - margin, max_y + margin)
         else:
-            # 데이터가 없으면 기본값 사용
+            # with no coordinates, fall back to a default extent
             ax.set_xlim(0, self.map_width)
             ax.set_ylim(0, self.map_height)
         ax.set_xlabel('X Position (m)')
@@ -744,7 +740,7 @@ class GlobalPlanner(DEVSAtomicModel):
 
 
 def simplify_path_with_los(path, terrain_polygons):
-    """Line of Sight를 이용한 경로 단순화"""
+    """Shorten a path by joining waypoints that have line of sight."""
     if not path or len(path) < 2:
         return path
 
@@ -770,16 +766,16 @@ def simplify_path_with_los(path, terrain_polygons):
 
 
 def line_of_sight(p1, p2, terrain_polygons):
-    """두 점 사이에 장애물이 없는지 확인"""
+    """Test whether two points have an unobstructed line between them."""
     line = LineString([p1, p2])
 
     for polygon in terrain_polygons:
-        # polygon이 이미 Shapely Polygon이면 그대로 사용
+        # already a shapely polygon: use it as is
         if isinstance(polygon, Polygon):
             if line.intersects(polygon):
                 return False
         else:
-            # 좌표 리스트면 Polygon으로 변환
+            # a coordinate list: convert it to a polygon
             if line.intersects(Polygon(polygon)):
                 return False
 

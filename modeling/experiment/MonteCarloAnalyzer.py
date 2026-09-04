@@ -1,11 +1,8 @@
-"""
-몬테카를로 시뮬레이션 통합 분석 모듈
+"""Aggregation of Monte Carlo replication results.
 
-역할:
-- 여러 번의 시뮬레이션 반복 결과를 수집 (단일 또는 다중 시나리오)
-- 각 지표의 최소/최대/평균/표준편차 계산
-- 시나리오별(차량 수별) 통계 CSV 저장
-- 에러바 그래프 생성 (평균 ± 표준편차)
+Computes the minimum, maximum, mean and standard deviation of each metric
+across replications, and writes the per-scenario CSVs and error-bar figures.
+Handles both a single scenario and a sweep over fleet sizes.
 """
 
 import os
@@ -18,11 +15,11 @@ from datetime import datetime
 
 
 def _configure_matplotlib_font():
-    """플랫폼별 한글 폰트 설정"""
+    """Select a font that can render Korean labels on this platform."""
     try:
         font_list = [f.name for f in fm.fontManager.ttflist]
         
-        # 플랫폼별 우선순위 폰트
+        # per-platform preference order
         if sys.platform.startswith('win'):
             korean_fonts = ['Malgun Gothic', 'NanumGothic', 'NanumBarunGothic', 'Gulim', 'Dotum', 'Batang']
         elif sys.platform == 'darwin':  # macOS
@@ -50,29 +47,23 @@ def _configure_matplotlib_font():
         plt.rcParams['axes.unicode_minus'] = False
 
 
-# 폰트 초기화
+# initialise the font
 _configure_matplotlib_font()
 
 
 class MonteCarloAnalyzer:
-    """몬테카를로 시뮬레이션 결과 통합 분석 (단일/다중 시나리오 지원)"""
+    """Aggregates Monte Carlo results, for a single scenario or a sweep."""
 
-    # 클래스 변수로 타임스탬프 공유 (Data_collector와 동기화)
+    # a class-level timestamp, kept in step with Data_collector
     _shared_timestamp = None
 
     def __init__(self, num_iterations, base_save_dir='Visualizations', shared_timestamp=None, vehicle_change_mode=False):
-        """
-        Args:
-            num_iterations: 몬테카를로 반복 횟수
-            base_save_dir: 결과 저장 기본 디렉토리
-            shared_timestamp: Data_collector와 공유할 타임스탬프
-            vehicle_change_mode: 차량 수 변경 모드 활성화 여부
-        """
+        """shared_timestamp makes this write into the same folder as Data_collector."""
         self.num_iterations = num_iterations
         self.base_save_dir = base_save_dir
         self.vehicle_change_mode = vehicle_change_mode
 
-        # 타임스탬프 동기화
+        # synchronise the timestamp
         if shared_timestamp:
             self.timestamp = shared_timestamp
         elif MonteCarloAnalyzer._shared_timestamp:
@@ -81,26 +72,23 @@ class MonteCarloAnalyzer:
             self.timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             MonteCarloAnalyzer._shared_timestamp = self.timestamp
 
-        # 결과 저장 구조
+        # result store
         if vehicle_change_mode:
-            # 다중 시나리오: {scenario_label: {iter_num: {metric: value}}}
+            # sweep: {scenario_label: {iter_num: {metric: value}}}
             self.iteration_results = {}
             self.scenario_labels = {}  # {scenario_label: vehicle_count}
         else:
-            # 단일 시나리오: {iter_num: {metric: value}}
+            # single scenario: {iter_num: {metric: value}}
             self.iteration_results = {}
 
-        # 색상 팔레트
+        # colour palette
         self.colorList = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
                           '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
 
     def register_scenario(self, scenario_label, vehicle_count):
-        """
-        시나리오 등록 (vehicle_change_mode에서만 사용)
-        
-        Args:
-            scenario_label: 시나리오 레이블 (예: "vehicle_num_3")
-            vehicle_count: 차량 수
+        """Register a scenario. Used only in fleet-size sweep mode.
+
+        scenario_label looks like "vehicle_num_3".
         """
         if self.vehicle_change_mode:
             if scenario_label not in self.iteration_results:
@@ -109,20 +97,10 @@ class MonteCarloAnalyzer:
                 print(f"[MonteCarloAnalyzer] 시나리오 등록: {scenario_label} (차량 {vehicle_count}대)")
 
     def add_iteration_result(self, iter_num, results_dict, scenario_label=None):
-        """
-        각 반복(iter)의 결과를 저장
+        """Store the result of one replication.
 
-        Args:
-            iter_num: 반복 번호 (1, 2, 3, ...)
-            results_dict: 결과 딕셔너리
-                {
-                    'avg_lead_time': 65595.27,
-                    'avg_wait_time': 1234.56,
-                    'total_jobs': 22,
-                    'avg_throughput': 0.05,
-                    ...
-                }
-            scenario_label: 시나리오 레이블 (vehicle_change_mode에서 필수)
+        results_dict maps metric names to values. In fleet-size sweep mode,
+        scenario_label is required.
         """
         if self.vehicle_change_mode:
             if scenario_label is None:
@@ -137,16 +115,12 @@ class MonteCarloAnalyzer:
             print(f"[MonteCarloAnalyzer] Iteration #{iter_num}/{self.num_iterations} 저장 완료")
 
     def analyze_and_save(self):
-        """
-        모든 반복이 완료된 후 통합 분석 수행
-        - 단일 모드: 기존과 동일
-        - 차량 변경 모드: 차량 수별 평균/표준편차 에러바 그래프
-        """
+        """Aggregate once every replication has finished."""
         if not self.iteration_results:
             print("[MonteCarloAnalyzer] 분석할 결과가 없습니다!")
             return
 
-        # 분석 디렉토리 생성
+        # create the analysis directory
         analysis_dir = os.path.join(self.base_save_dir, self.timestamp, 'analysis')
         os.makedirs(analysis_dir, exist_ok=True)
 
@@ -158,43 +132,43 @@ class MonteCarloAnalyzer:
         print(f"\n[MonteCarloAnalyzer] ✅ 분석 완료! 결과 저장 위치: {analysis_dir}\n")
 
     def _analyze_single_mode(self, analysis_dir):
-        """단일 시나리오 분석 (기존 방식 유지 - 간소화)"""
+        """Analyse a single scenario."""
         print(f"\n{'='*70}")
         print(f"📊 Monte Carlo 분석 ({len(self.iteration_results)} iterations)")
         print(f"{'='*70}\n")
 
-        # 통계 계산
+        # statistics
         statistics = self._calculate_statistics_single()
         
-        # CSV 저장
+        # CSV
         self._save_iteration_logs_single(analysis_dir)
         
-        # 요약 리포트
+        # summary report
         self._save_statistics_summary_single(statistics, analysis_dir)
         
-        # 에러바 그래프 (평균 ± 표준편차만 표시)
+        # error-bar figure showing mean and standard deviation
         self._plot_summary_errorbar(statistics, analysis_dir)
 
     def _analyze_vehicle_change_mode(self, analysis_dir):
-        """차량 수 변경 모드 분석"""
+        """Analyse the sweep over fleet sizes."""
         print(f"\n{'='*70}")
         print(f"🚗 Vehicle Change Mode 분석")
         print(f"{'='*70}\n")
 
-        # 시나리오별 통계 계산
+        # per-scenario statistics
         scenario_statistics = self._calculate_statistics_multi_scenario()
         
-        # CSV 저장
+        # CSV
         self._save_scenario_logs(analysis_dir, scenario_statistics)
         
-        # 요약 리포트
+        # summary report
         self._save_scenario_summary(scenario_statistics, analysis_dir)
         
-        # 차량 수별 에러바 그래프
+        # error-bar figure against fleet size
         self._plot_vehicle_comparison(scenario_statistics, analysis_dir)
 
     def _calculate_statistics_single(self):
-        """단일 시나리오 통계 계산"""
+        """Compute the metric statistics for a single scenario."""
         statistics = {}
         if not self.iteration_results:
             return statistics
@@ -221,7 +195,7 @@ class MonteCarloAnalyzer:
         return statistics
 
     def _calculate_statistics_multi_scenario(self):
-        """다중 시나리오 통계 계산 (차량 수별)"""
+        """Compute the metric statistics for each fleet size."""
         scenario_statistics = {}
         
         for scenario_label in sorted(self.iteration_results.keys()):
@@ -252,7 +226,7 @@ class MonteCarloAnalyzer:
         return scenario_statistics
 
     def _save_iteration_logs_single(self, analysis_dir):
-        """단일 모드 CSV 저장"""
+        """Write the single-scenario results to CSV."""
         if not self.iteration_results:
             return
 
@@ -279,11 +253,11 @@ class MonteCarloAnalyzer:
                     writer.writerow([f'[#{iter_num}] {metric_name}', value])
 
     def _save_scenario_logs(self, analysis_dir, scenario_statistics):
-        """차량 변경 모드 CSV 저장"""
+        """Write the fleet-size sweep results to CSV."""
         if not scenario_statistics:
             return
 
-        # 메트릭별로 파일 생성
+        # one file per metric
         first_scenario = next(iter(scenario_statistics.values()))
         metrics = first_scenario.keys()
 
@@ -306,25 +280,20 @@ class MonteCarloAnalyzer:
                         ])
 
     def _save_iteration_logs(self, analysis_dir):
-        """
-        예제 형식으로 CSV 로그 저장
-        [#1] avgLeadTime, 65595.27
-        [#2] avgLeadTime, 70594.82
-        ...
-        """
-        # 각 지표별로 별도 CSV 파일 생성
+        """Write one row per replication, formatted as "[#1] avgLeadTime, 65595.27"."""
+        # a separate CSV per metric
         if not self.iteration_results:
             return
 
-        # 첫 번째 반복에서 사용 가능한 지표 목록 추출
+        # take the metric list from the first replication
         first_iter = next(iter(self.iteration_results.values()))
         metrics = first_iter.keys()
 
-        # 각 메트릭별 소수점 자릿수 설정
+        # decimal places per metric
         precision_map = {
             'avg_lead_time': 2,
             'avg_wait_time': 2,
-            'avg_throughput': 6,  # throughput은 작은 값이므로 더 많은 자릿수
+            'avg_throughput': 6,  # throughput is small, so it needs more digits
             'sim_time': 2,
             'real_time': 2,
             'time_ratio': 4,
@@ -344,12 +313,12 @@ class MonteCarloAnalyzer:
             with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
 
-                # 각 반복의 결과를 한 줄씩 저장
+                # one row per replication
                 for iter_num in sorted(self.iteration_results.keys()):
                     value = self.iteration_results[iter_num].get(
                         metric_name, 'N/A')
                     
-                    # 숫자 값인 경우 포맷팅 적용
+                    # format numeric values
                     if value != 'N/A' and isinstance(value, (int, float)):
                         precision = precision_map.get(metric_name, 4)
                         if precision == 0:
@@ -360,32 +329,21 @@ class MonteCarloAnalyzer:
                     writer.writerow([f'[#{iter_num}] {metric_name}', value])
 
     def _calculate_statistics(self):
-        """
-        각 지표의 최소/최대/평균/표준편차 계산
+        """Compute the minimum, maximum, mean and standard deviation of each metric.
 
-        Returns:
-            {
-                'avg_lead_time': {
-                    'values': [65595.27, 70594.82, ...],
-                    'min': 62670.45,
-                    'max': 71365.0,
-                    'mean': 68122.34,
-                    'std': 2345.67
-                },
-                ...
-            }
+        Returns {metric: {'values': [...], 'min': ..., 'max': ..., 'mean': ..., 'std': ...}}.
         """
         statistics = {}
 
         if not self.iteration_results:
             return statistics
 
-        # 첫 번째 반복에서 지표 목록 추출
+        # take the metric list from the first replication
         first_iter = next(iter(self.iteration_results.values()))
         metrics = first_iter.keys()
 
         for metric_name in metrics:
-            # 모든 반복의 해당 지표 값 수집
+            # gather that metric across every replication
             values = []
             for iter_num in sorted(self.iteration_results.keys()):
                 value = self.iteration_results[iter_num].get(metric_name)
@@ -404,7 +362,7 @@ class MonteCarloAnalyzer:
         return statistics
 
     def _save_statistics_summary(self, statistics, analysis_dir):
-        """통계 요약 리포트 저장"""
+        """Write the statistical summary report."""
         report_path = os.path.join(analysis_dir, 'montecarlo_summary.txt')
 
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -519,7 +477,7 @@ class MonteCarloAnalyzer:
             f.write("=" * 70 + "\n")
 
     def _plot_lead_time_statistics(self, statistics, analysis_dir):
-        """Lead Time 통계 시각화"""
+        """Lead-time figure."""
         if 'avg_lead_time' not in statistics:
             return
 
@@ -528,22 +486,22 @@ class MonteCarloAnalyzer:
 
         plt.figure(figsize=(14, 8))
 
-        # 개별 데이터 포인트
+        # individual replications
         plt.plot(iterations, stats['values'], 'o-',
                  color=self.colorList[0], alpha=0.6, linewidth=1.5,
                  markersize=6, label='각 반복 결과')
 
-        # 평균선
+        # mean
         plt.axhline(y=stats['mean'], color='green', linestyle='--',
                     linewidth=2, label=f"평균: {stats['mean']:.2f}s")
 
-        # 최소/최대선
+        # minimum and maximum
         plt.axhline(y=stats['min'], color='blue', linestyle=':',
                     linewidth=1.5, label=f"최소: {stats['min']:.2f}s")
         plt.axhline(y=stats['max'], color='red', linestyle=':',
                     linewidth=1.5, label=f"최대: {stats['max']:.2f}s")
 
-        # 표준편차 영역
+        # standard-deviation band
         plt.fill_between(iterations,
                          stats['mean'] - stats['std'],
                          stats['mean'] + stats['std'],
@@ -563,7 +521,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_wait_time_statistics(self, statistics, analysis_dir):
-        """Wait Time 통계 시각화"""
+        """Wait-time figure."""
         if 'avg_wait_time' not in statistics:
             return
 
@@ -603,7 +561,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_throughput_statistics(self, statistics, analysis_dir):
-        """Throughput 통계 시각화"""
+        """Throughput figure."""
         if 'avg_throughput' not in statistics:
             return
 
@@ -638,8 +596,8 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_algorithm_performance(self, statistics, analysis_dir):
-        """알고리즘 성능 통계 시각화"""
-        # Global Planner와 Local Planner 통계 확인
+        """Planner computation-time figure."""
+        # check that both planner statistics are present
         has_global = 'global_planner_time' in statistics
         has_local = 'local_planner_time' in statistics
 
@@ -735,7 +693,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_time_performance(self, statistics, analysis_dir):
-        """시뮬레이션 시간 vs Real Time 성능 분석"""
+        """Compare simulated time against wall-clock time."""
         has_sim_time = 'sim_time' in statistics
         has_real_time = 'real_time' in statistics
         has_time_ratio = 'time_ratio' in statistics
@@ -807,7 +765,7 @@ class MonteCarloAnalyzer:
             ax.set_xlabel('Iteration', fontsize=11)
             ax.set_ylabel('Time Ratio (Real/Sim)', fontsize=11)
 
-            # 성능 메시지
+            # performance summary line
             if stats['mean'] < 1.0:
                 performance_msg = f"실시간보다 {1/stats['mean']:.1f}배 빠름 ⚡"
             else:
@@ -818,7 +776,7 @@ class MonteCarloAnalyzer:
             ax.legend(loc='best')
             ax.grid(True, alpha=0.3)
 
-        # 4. Sim Time vs Real Time 비교 (Scatter)
+        # 4. simulated time against wall-clock time, as a scatter
         ax = axes[1, 1]
         sim_values = statistics['sim_time']['values']
         real_values = statistics['real_time']['values']
@@ -826,12 +784,12 @@ class MonteCarloAnalyzer:
         ax.scatter(sim_values, real_values,
                    s=100, alpha=0.6, color=self.colorList[8], edgecolors='black', linewidth=1)
 
-        # 대각선 (y=x) - 실시간 기준선
+        # y = x marks real time
         max_val = max(max(sim_values), max(real_values))
         ax.plot([0, max_val], [0, max_val], 'r--', linewidth=2,
                 alpha=0.5, label='실시간 기준 (Real=Sim)')
 
-        # 추세선
+        # trend line
         z = np.polyfit(sim_values, real_values, 1)
         p = np.poly1d(z)
         ax.plot(sim_values, p(sim_values), 'b-', linewidth=2, alpha=0.7,
@@ -851,7 +809,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_all_metrics_comparison(self, statistics, analysis_dir):
-        """모든 지표를 한 화면에 비교"""
+        """Render every metric on one sheet."""
         num_metrics = len(statistics)
         if num_metrics == 0:
             return
@@ -865,7 +823,7 @@ class MonteCarloAnalyzer:
             ax = axes[idx]
             iterations = list(range(1, len(stats['values']) + 1))
 
-            # 박스플롯 스타일
+            # box-plot styling
             ax.plot(iterations, stats['values'], 'o-',
                     color=self.colorList[idx % len(self.colorList)],
                     alpha=0.6, linewidth=1.5, markersize=5)
@@ -894,7 +852,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _save_statistics_summary_single(self, statistics, analysis_dir):
-        """단일 모드 통계 요약 저장"""
+        """Write the single-scenario summary."""
         report_path = os.path.join(analysis_dir, 'montecarlo_summary.txt')
         
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -904,7 +862,7 @@ class MonteCarloAnalyzer:
             f.write(f"총 반복 횟수: {len(self.iteration_results)}\n")
             f.write(f"분석 시각: {self.timestamp}\n\n")
             
-            # 주요 성능 지표
+            # headline metrics
             f.write("-" * 70 + "\n")
             f.write("📊 주요 성능 지표\n")
             f.write("-" * 70 + "\n\n")
@@ -920,7 +878,7 @@ class MonteCarloAnalyzer:
             f.write("=" * 70 + "\n")
 
     def _save_scenario_summary(self, scenario_statistics, analysis_dir):
-        """차량 변경 모드 통계 요약 저장"""
+        """Write the fleet-size sweep summary."""
         report_path = os.path.join(analysis_dir, 'vehicle_comparison_summary.txt')
         
         with open(report_path, 'w', encoding='utf-8') as f:
@@ -931,7 +889,7 @@ class MonteCarloAnalyzer:
             f.write(f"차량 수 범위: {min(self.scenario_labels.values())} ~ {max(self.scenario_labels.values())}대\n")
             f.write(f"각 시나리오당 반복 횟수: {self.num_iterations}\n\n")
             
-            # 차량 수별 주요 지표 테이블
+            # table of headline metrics against fleet size
             f.write("-" * 70 + "\n")
             f.write("📊 차량 수별 성능 비교\n")
             f.write("-" * 70 + "\n\n")
@@ -953,7 +911,7 @@ class MonteCarloAnalyzer:
             f.write("=" * 70 + "\n")
 
     def _plot_summary_errorbar(self, statistics, analysis_dir):
-        """단일 모드 에러바 요약 그래프"""
+        """Single-scenario error-bar figure."""
         key_metrics = {
             'avg_lead_time': ('평균 Lead Time', '초'),
             'avg_wait_time': ('평균 Wait Time', '초'),
@@ -991,7 +949,7 @@ class MonteCarloAnalyzer:
         plt.close()
 
     def _plot_vehicle_comparison(self, scenario_statistics, analysis_dir):
-        """차량 수별 비교 에러바 그래프"""
+        """Error-bar figure comparing fleet sizes."""
         key_metrics = {
             'avg_lead_time': ('평균 Lead Time', '초'),
             'avg_wait_time': ('평균 Wait Time', '초'),
@@ -1036,7 +994,7 @@ class MonteCarloAnalyzer:
         plt.savefig(os.path.join(analysis_dir, 'vehicle_comparison.png'), dpi=150)
         plt.close()
         
-        # 개별 메트릭 상세 그래프
+        # per-metric detail figures
         for metric, (title, unit) in key_metrics.items():
             vehicle_counts = []
             means = []
@@ -1061,7 +1019,7 @@ class MonteCarloAnalyzer:
                             color=self.colorList[0], ecolor='black', 
                             linewidth=2.5, alpha=0.8, label='평균 ± 표준편차')
                 
-                # Min/Max 영역 표시
+                # minimum-to-maximum band
                 plt.fill_between(vehicle_counts, mins, maxs, alpha=0.2, 
                                color=self.colorList[1], label='최소-최대 범위')
                 

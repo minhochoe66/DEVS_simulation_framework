@@ -9,46 +9,45 @@ class SystemController(DEVSCoupledModel):
 
         self.globalVar = globalVar
 
-        # 하위 모델 생성
+        # Submodels
         fleetManagement = FleetManagement("FleetManagement", self.globalVar)
         scheduler = Scheduler("Scheduler", self.globalVar)
 
         self.addModel(fleetManagement)
         self.addModel(scheduler)
 
-        # Input Ports (외부에서 들어오는 포트)
-        self.addInputPort("amrPosition")  # AMR 위치 정보
-        self.addInputPort("informDone")   # Equipment 작업 완료
-        self.addInputPort("informFree")   # Equipment 준비 완료
-        self.addInputPort("undockingComplete_I")  # AMR 언도킹 완료
+        # Input Ports
+        self.addInputPort("amrPosition")  # AMR pose
+        self.addInputPort("informDone")   # Equipment finished a job
+        self.addInputPort("informFree")   # Equipment is free
+        self.addInputPort("undockingComplete_I")  # AMR undocking complete
 
-        # Output Ports (외부로 나가는 포트)
-        self.addOutputPort("jobAssign")   # 작업 배정
+        # Output Ports
+        self.addOutputPort("jobAssign")   # job assignment
 
-        # External Input Coupling (외부 → 내부)
-        # AMR 위치 정보 → FleetManagement
+        # External Input Coupling
+        # AMR pose -> FleetManagement
         self.addExternalInputCoupling(
             "amrPosition", fleetManagement, "amrPosition")
         self.addExternalInputCoupling(
             "undockingComplete_I", fleetManagement, "undockingComplete_I")
-        # Equipment 정보 → Scheduler
+        # Equipment state -> Scheduler
         self.addExternalInputCoupling("informDone", scheduler, "informDone")
         self.addExternalInputCoupling("informFree", scheduler, "informFree")
 
-        # Internal Coupling (내부 연결)
-        # FleetManagement → Scheduler
+        # Internal Coupling
+        # FleetManagement -> Scheduler
         self.addInternalCoupling(
             fleetManagement, "fleetInfo", scheduler, "fleetInfo")
 
-        # Scheduler → FleetManagement (작업 할당 정보)
+        # Scheduler -> FleetManagement (task assignment)
         self.addInternalCoupling(
             scheduler, "taskAssign", fleetManagement, "taskAssign")
 
-        # External Output Coupling (내부 → 외부)
-        # Scheduler → 외부
+        # External Output Coupling
         self.addExternalOutputCoupling(scheduler, "jobAssign", "jobAssign")
 
-        # FleetManagement → 외부 (AMR 명령)
+        # FleetManagement -> outside (AMR commands)
         self.addOutputPort("amrCommand")
         self.addExternalOutputCoupling(
             fleetManagement, "amrCommand", "amrCommand")

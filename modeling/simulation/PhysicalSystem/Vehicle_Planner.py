@@ -19,26 +19,26 @@ class Planner_AMR(DEVSCoupledModel):
         self.addModel(lpp)
 
         # Input Ports
-        self.addInputPort("Task_I")  # FleetManagement로부터 작업 지시
-        self.addInputPort("amrCommand")  # FleetManagement로부터 AMR 명령
-        # FleetManagement로부터 단순 이동 명령 (jobID 없음)
+        self.addInputPort("Task_I")  # transport order from FleetManagement
+        self.addInputPort("amrCommand")  # AMR command from FleetManagement
+        # bare move command, no jobID
         self.addInputPort("amrGoCommand")
         self.addInputPort("MyManeuverState_I")
         self.addInputPort("OtherManeuverState_I")
-        self.addInputPort("jobExchange_I")  # Equipment로부터 작업 교환 완료
+        self.addInputPort("jobExchange_I")  # job handover complete, from Equipment
 
         # Output Ports
         self.addOutputPort("RequestManeuver_O")
         self.addOutputPort("EmergencyBackup_O")
         self.addOutputPort("Complete_O")
         self.addOutputPort("Docking_O")
-        self.addOutputPort("UndockingComplete_O")  # 언도킹 완료 신호
+        self.addOutputPort("UndockingComplete_O")  # undocking complete
 
-        # FleetManagement -> GlobalPlanner (작업 지시)
+        # FleetManagement -> GlobalPlanner (transport order)
         self.addExternalInputCoupling("Task_I", gpp, "Task_I")
 
         self.addExternalInputCoupling("amrGoCommand", gpp, "amrGoCommand")
-        # FleetManagement -> Maneuver (AMR 명령)
+        # FleetManagement -> Maneuver (AMR command)
         self.addExternalInputCoupling("amrCommand", lpp, "amrCommand")
         # Maneuver -> GlobalPlanner
         self.addExternalInputCoupling(
@@ -48,13 +48,13 @@ class Planner_AMR(DEVSCoupledModel):
         self.addExternalInputCoupling(
             "MyManeuverState_I", lpp, "ManeuverState_I")
 
-        # Sensor -> Planners (다른 에이전트/장애물 정보)
+        # Sensor -> Planners (peer robots and obstacles)
         self.addExternalInputCoupling(
             "OtherManeuverState_I", lpp, "OtherManeuverState_I")
         self.addExternalInputCoupling(
             "OtherManeuverState_I", gpp, "OtherManeuverState_I")
 
-        # Equipment -> LocalPlanner (작업 교환 완료)
+        # Equipment -> LocalPlanner (job handover complete)
         self.addExternalInputCoupling(
             "jobExchange_I", lpp, "jobExchange_I")
         self.addExternalInputCoupling(
@@ -64,7 +64,7 @@ class Planner_AMR(DEVSCoupledModel):
             lpp, "RequestManeuver_O", "RequestManeuver_O")
         self.addExternalOutputCoupling(
             lpp, "EmergencyBackup_O", "EmergencyBackup_O")
-        # 도킹 명령/완료 신호 외부로 노출 (필요시 상위에서 Maneuver와 연결)
+        # Expose the docking command and completion signal to the parent model
         self.addExternalOutputCoupling(lpp, "Docking_O", "Docking_O")
         self.addExternalOutputCoupling(
             lpp, "EquipmentDocking", "EquipmentDocking")
@@ -73,11 +73,11 @@ class Planner_AMR(DEVSCoupledModel):
         self.addExternalOutputCoupling(
             lpp, "UndockingComplete_O", "UndockingComplete_O")
         # Internal Coupling
-        # GlobalPlanner → LocalPlanner (경로 전달)
+        # GlobalPlanner -> LocalPlanner (global path)
         self.addInternalCoupling(
             gpp, "GlobalWaypoint_O", lpp, "GlobalWaypoint_I")
 
-        # LocalPlanner → GlobalPlanner (재계획 요청)
+        # LocalPlanner -> GlobalPlanner (replan request)
         self.addInternalCoupling(lpp, "Replan", gpp, "Replan")
         self.addInternalCoupling(lpp, "Docking_O", gpp, "Docking_I")
         self.addInternalCoupling(

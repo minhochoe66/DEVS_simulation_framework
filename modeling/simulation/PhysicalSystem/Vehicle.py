@@ -8,8 +8,6 @@ class AMR(DEVSCoupledModel):
     def __init__(self, ID, objConfiguration, globalVar, algorithm):
         super().__init__(ID)
 
-        # 입력 및 출력 포트 설정
-        # GPP의 Done 메시지를 Agent의 Done_OUT으로 전달
         self.objConfiguration = objConfiguration
         self.globalVar = globalVar
         self.vehicleID = ID
@@ -25,10 +23,10 @@ class AMR(DEVSCoupledModel):
         self.addModel(planner_amr)
 
         # Input Ports
-        self.addInputPort("amrCommand")  # FleetManagement로부터 작업 지시
-        self.addInputPort("amrGoCommand")  # FleetManagement로부터 작업 지시
+        self.addInputPort("amrCommand")  # transport order from FleetManagement
+        self.addInputPort("amrGoCommand")  # bare move command, no job attached
         self.addInputPort("OtherManeuverState_I")
-        self.addInputPort("jobExchange_I")  # Equipment로부터 작업 교환 완료 신호
+        self.addInputPort("jobExchange_I")  # job handover complete, from Equipment
 
         # Output Ports
         self.addOutputPort("MyManeuverState_O")
@@ -42,9 +40,9 @@ class AMR(DEVSCoupledModel):
         self.addExternalInputCoupling(
             "amrGoCommand", planner_amr, "amrGoCommand")
         self.addExternalInputCoupling(
-            "amrCommand", maneuver, "amrCommand")  # 직접 Maneuver로도 전달
+            "amrCommand", maneuver, "amrCommand")  # also routed straight to Maneuver
         self.addExternalInputCoupling(
-            "OtherManeuverState_I", sensor, "OtherManeuverState_I")  # 다른 AMR의 위치 정보
+            "OtherManeuverState_I", sensor, "OtherManeuverState_I")  # peer robot poses
         self.addExternalInputCoupling(
             "jobExchange_I", planner_amr, "jobExchange_I")
         self.addExternalInputCoupling(

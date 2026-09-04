@@ -9,7 +9,7 @@ class MsgManeuverState:
         self.path = path
         self.is_returning = is_returning
         self.transportPhase = transportPhase  # "TO_FROM" or "TO_DESTINATION"
-        self.goalNodeID = goalNodeID  # 현재 목표 NodeID (예: "A-1_IN")
+        self.goalNodeID = goalNodeID  # current goal node ID, e.g. "A-1_IN"
 
     def __str__(self):
         ret = ""

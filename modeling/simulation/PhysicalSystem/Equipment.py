@@ -18,13 +18,13 @@ class Equipment(DEVSAtomicModel):
 
         # Input Ports
         self.addInputPort("job")
-        self.addInputPort("amrDocking")  # Maneuver용 도킹 신호 (무시)
-        self.addInputPort("EquipmentDocking")  # Equipment용 도킹 신호
+        self.addInputPort("amrDocking")  # docking signal for Maneuver, unused here
+        self.addInputPort("EquipmentDocking")  # docking signal for Equipment
 
         # Output Ports
         self.addOutputPort("informDone")
         self.addOutputPort("informFree")
-        self.addOutputPort("jobExchange")  # AMR과 작업 교환
+        self.addOutputPort("jobExchange")  # job handover with the AMR
 
         # State Variables
         self.addStateVariable("strID", strID)
@@ -35,8 +35,8 @@ class Equipment(DEVSAtomicModel):
 
         # Variables
         self.currentJob = None
-        self.reservedJob = None  # 예약된 작업 (job 이벤트로 받음)
-        self.currentAMR = None   # 현재 도킹한 AMR ID
+        self.reservedJob = None  # job reserved by a job event
+        self.currentAMR = None   # ID of the currently docked AMR
         self.dockingPhase = None  # "TO_FROM" or "TO_DESTINATION"
 
     def funcExternalTransition(self, strPort, objEvent):
@@ -48,7 +48,7 @@ class Equipment(DEVSAtomicModel):
                     objEvent[0])
 
                 if equipmentInfo.strType == "SOURCE":
-                    # SOURCE: 바로 처리 시작 (AMR 없이 작업 생성)
+                    # SOURCE starts processing immediately, without an AMR
                     jobInfo = self.globalVar.getTargetJobsByID(jobID)
                     jobInfo.setTime('start', objEvent[0], self.getTime())
                     jobInfo.setCurrentProcess(
@@ -64,7 +64,7 @@ class Equipment(DEVSAtomicModel):
                     )
 
                 elif self.state == "EMPTY":
-                    # 일반 장비: 작업 예약 (AMR 대기)
+                    # other machines reserve the job and wait for an AMR
                     self.reservedJob = jobID
                     equipmentInfo.setEquipmentState("RESERVED")
 
@@ -97,14 +97,13 @@ class Equipment(DEVSAtomicModel):
 
     def funcOutput(self):
         if self.state == "LOAD":
-            # AMR → Equipment: 작업 전달
+            # AMR -> Equipment: hand the job over
             equipmentInfo = self.globalVar.getEquipmentInfoByID(
                 self.getStateValue("strID"))
 
-            # TO_DESTINATION: AMR이 가져온 작업 ID 사용
-            # TO_FROM: 예약된 작업 ID 사용
+            # TO_DESTINATION uses the job ID the AMR carries
+            # TO_FROM uses the reserved job ID
             if self.dockingPhase == "TO_DESTINATION":
-                # AMR의 작업 ID 가져오기
                 amr_job_id = self.globalVar.getVehicleInfoByID(
                     self.currentAMR).intJobID
                 if amr_job_id is None:
@@ -114,7 +113,6 @@ class Equipment(DEVSAtomicModel):
                     return
                 job_id = amr_job_id
             else:
-                # TO_FROM: 예약된 작업 사용
                 if self.reservedJob is None:
                     self.globalVar.printTerminal(
                         f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] Warning: No reserved job for TO_FROM phase"
@@ -146,24 +144,24 @@ class Equipment(DEVSAtomicModel):
             jobInfo = self.globalVar.getTargetJobsByID(
                 equipmentInfo.intProcessingJobID)
 
-            # Process Time 기록
+            # Record the processing time
             equipmentInfo.totalProcessedTime += self.getStateValue(
                 "processTime")
 
-            # Job 완료 처리
+            # Job completion
             equipmentInfo.setEquipmentState("DONE")
             jobInfo.setTime('done', self.getStateValue(
                 "strID"), self.getTime())
 
             if equipmentInfo.strType == "SINK":
-                # 최종 출구: 완료 처리
+                # SINK: the job leaves the system
                 jobInfo.setTime('out', self.getStateValue(
                     "strID"), self.getTime())
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] Job #{jobInfo.intJobID} COMPLETED (waiting for AMR)"
                 )
             else:
-                # 일반 공정: 처리 완료
+                # ordinary stage: report completion
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] Job #{jobInfo.intJobID} process done (waiting for AMR)"
                 )
@@ -173,7 +171,7 @@ class Equipment(DEVSAtomicModel):
             return True
 
         elif self.state == "UNLOAD":
-            # Equipment → AMR: 작업 전달
+            # Equipment -> AMR: hand the job over
             equipmentInfo = self.globalVar.getEquipmentInfoByID(
                 self.getStateValue("strID"))
             jobInfo = self.globalVar.getTargetJobsByID(self.currentJob)
@@ -201,26 +199,26 @@ class Equipment(DEVSAtomicModel):
             print(
                 f"🚪 [EQUIPMENT_UNDOCKING] {self.getStateValue('strID')}: Using currentAMR={self.currentAMR}, phase={self.dockingPhase}")
 
-            # ⚠️ 좌표 설정은 Local_Planner에서만 처리 (충돌 방지)
+            # Coordinates are set only by Local_Planner, to avoid conflicting writes
             # Out_pos = self.globalVar.getEquipmentInfoByID(
             #     self.getStateValue("strID")).outputPort.get('position')
             # self.globalVar.getVehicleInfoByID(
             #     self.currentAMR).setCoordinates([Out_pos['x'], Out_pos['y']])
 
-            # Equipment 연결만 해제
+            # release only the equipment linkage
             self.globalVar.getVehicleInfoByID(
                 self.currentAMR).setEquipmentID(None)
 
-            # Phase에 따라 다른 신호 전송
+            # the signal sent depends on the transport phase
             if self.dockingPhase == "TO_FROM":
-                # FROM Equipment: 픽업 후 → 작업 ID와 함께 신호
+                # FROM equipment: after pickup, report with the job ID
                 self.addOutputEvent("UndockingComplete", [
                     self.currentAMR, self.getStateValue("strID"), self.currentJob, "TO_FROM"])
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] FROM UNDOCKING: Job #{self.currentJob} picked up by AMR {self.currentAMR}"
                 )
             else:  # TO_DESTINATION
-                # TO Equipment: 하역 후 → FREE 신호
+                # TO equipment: after delivery, report free
                 self.addOutputEvent("UndockingComplete", [
                     self.currentAMR, self.getStateValue("strID"), self.currentJob, "TO_DESTINATION"])
                 self.globalVar.printTerminal(
@@ -236,17 +234,17 @@ class Equipment(DEVSAtomicModel):
             equipmentInfo = self.globalVar.getEquipmentInfoByID(
                 self.getStateValue("strID"))
 
-            # GlobalVar에 AMR-장비 연결 저장
+            # record the AMR-equipment linkage in GlobalVar
             self.globalVar.getVehicleInfoByID(
                 self.currentAMR).setEquipmentID(self.getStateValue("strID"))
 
-            # AMR 위치를 WORK 포트로 설정 (도킹 후 1초)
+            # one second after docking, move the AMR to the WORK port
             work_pos = equipmentInfo.workPosition.get('position')
             self.globalVar.getVehicleInfoByID(
                 self.currentAMR).setCoordinates([work_pos['x'], work_pos['y']])
-            # Phase에 따라 LOAD/UNLOAD 분기
+            # the transport phase selects LOAD or UNLOAD
             if self.dockingPhase == "TO_FROM":
-                # From Equipment: 픽업 → UNLOAD
+                # FROM equipment: a pickup, so UNLOAD
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] Phase TO_FROM → UNLOAD (pickup)"
                 )
@@ -254,7 +252,7 @@ class Equipment(DEVSAtomicModel):
                     self.currentAMR).setCoordinates([work_pos['x'], work_pos['y']])
                 self.state = self.stateList[4]  # UNLOAD
             else:  # TO_DESTINATION
-                # To Equipment: 하역 → LOAD
+                # TO equipment: a delivery, so LOAD
                 self.globalVar.printTerminal(
                     f"[{self.getTime()}][Equipment({self.getStateValue('strID')})] Phase TO_DESTINATION → LOAD (delivery)"
                 )
@@ -262,12 +260,12 @@ class Equipment(DEVSAtomicModel):
             return True
 
         elif self.state == "LOAD":
-            # LOAD → UNDOCKING (AMR이 작업을 전달하고 나감)
+            # LOAD -> UNDOCKING: the AMR has delivered and leaves
             self.state = self.stateList[7]  # UNDOCKING
             return True
 
         elif self.state == "BUSY":
-            # BUSY → DONE (AMR 대기)
+            # BUSY -> DONE: wait for an AMR
             equipmentInfo = self.globalVar.getEquipmentInfoByID(
                 self.getStateValue("strID"))
             if equipmentInfo.strType == "SINK":
@@ -278,12 +276,12 @@ class Equipment(DEVSAtomicModel):
             return True
 
         elif self.state == "UNLOAD":
-            # UNLOAD → UNDOCKING (AMR이 작업을 가지고 나감)
+            # UNLOAD -> UNDOCKING: the AMR takes the job and leaves
             self.state = self.stateList[7]  # UNDOCKING
             return True
 
         elif self.state == "INFORM":
-            # INFORM → EMPTY (대기 상태로)
+            # INFORM -> EMPTY
             equipmentInfo = self.globalVar.getEquipmentInfoByID(
                 self.getStateValue("strID"))
             equipmentInfo.setEquipmentState("EMPTY")
@@ -294,9 +292,9 @@ class Equipment(DEVSAtomicModel):
             return True
 
         elif self.state == "UNDOCKING":
-            # Phase에 따라 다른 상태로 전환
+            # the next state depends on the transport phase
             if self.dockingPhase == "TO_FROM":
-                # FROM Equipment: UNDOCKING → EMPTY (작업을 AMR이 가져감)
+                # FROM equipment: UNDOCKING -> EMPTY, the AMR took the job
                 equipmentInfo = self.globalVar.getEquipmentInfoByID(
                     self.getStateValue("strID"))
                 equipmentInfo.setEquipmentState("EMPTY")
@@ -309,7 +307,7 @@ class Equipment(DEVSAtomicModel):
                 self.currentAMR = None
                 return True
             else:  # TO_DESTINATION
-                # TO Equipment: UNDOCKING → BUSY (작업 처리 시작)
+                # TO equipment: UNDOCKING -> BUSY, processing starts
                 equipmentInfo = self.globalVar.getEquipmentInfoByID(
                     self.getStateValue("strID"))
                 equipmentInfo.setProcessingJobID(self.currentJob)
@@ -334,7 +332,7 @@ class Equipment(DEVSAtomicModel):
         elif self.state == "BUSY":
             return self.getStateValue("processTime")
         elif self.state == "DONE":
-            return float('inf')  # AMR 도착 대기
+            return float('inf')  # wait for an AMR to arrive
         elif self.state == "INFORM":
             return 0
         elif self.state == "DOCKING":
