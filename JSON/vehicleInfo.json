@@ -1,0 +1,161 @@
+{
+    "fileName": "vehicleInfo",
+    "vehicleInfo": [
+        {
+            "vehicleID": "VEHICLE0000000000001",
+            "coordinates": [
+                55,
+                30
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000002",
+            "coordinates": [
+                55,
+                50
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000003",
+            "coordinates": [
+                10,
+                20
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000004",
+            "coordinates": [
+                15,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000005",
+            "coordinates": [
+                20,
+                20
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000006",
+            "coordinates": [
+                25,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000007",
+            "coordinates": [
+                30,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000008",
+            "coordinates": [
+                35,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000009",
+            "coordinates": [
+                40,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000010",
+            "coordinates": [
+                45,
+                5
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000011",
+            "coordinates": [
+                0,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000012",
+            "coordinates": [
+                5,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000013",
+            "coordinates": [
+                10,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000014",
+            "coordinates": [
+                15,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000015",
+            "coordinates": [
+                20,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000016",
+            "coordinates": [
+                25,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000017",
+            "coordinates": [
+                30,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000018",
+            "coordinates": [
+                35,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000019",
+            "coordinates": [
+                40,
+                95
+            ]
+        },
+        {
+            "vehicleID": "VEHICLE0000000000020",
+            "coordinates": [
+                45,
+                95
+            ]
+        }
+    ],
+    "vehicleParam": {
+        "robot_radius": 1.0,
+        "obstacle_radius": 0.7,
+        "max_speed": 1.5,
+        "min_speed": 0.0,
+        "max_accel": 0.2,
+        "max_yaw_rate": 0.6981317007977318,
+        "max_delta_yaw_rate": 6.283185307179586,
+        "dt": 0.1,
+        "predict_time": 2.0,
+        "v_resolution": 0.1,
+        "yaw_rate_resolution": 0.017,
+        "to_goal_cost_gain": 1.0,
+        "speed_cost_gain": 1.0,
+        "obstacle_cost_gain": 1.0
+    }
+}

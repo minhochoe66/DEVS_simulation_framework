@@ -1,0 +1,14 @@
+# Runtime dependencies of the DEVS-based AMR path-planning simulation framework.
+#
+# Lower bounds are the versions the framework has been exercised with; the
+# upper bounds are deliberately open. Install with:
+#
+#     pip install -r requirements.txt
+#
+# Python >= 3.8 is required (3.11 or newer recommended).
+
+numpy>=1.24          # vector/kinematics arithmetic across all atomic models
+shapely>=2.0         # obstacle geometry, line-of-sight and collision queries
+matplotlib>=3.7      # live Visualizer and post-hoc analysis figures
+scipy>=1.10          # statistics used by SimulationEngine/Visualzer
+pandas>=2.0          # trajectory replay in Visualizations/visualize.py

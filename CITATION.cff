@@ -1,0 +1,63 @@
+cff-version: 1.2.0
+message: >-
+  If you use this software in your research, please cite both the software and
+  the accompanying article.
+title: >-
+  DEVS_simulation_framework: a DEVS-based simulation framework for evaluating
+  path planning algorithms in autonomous mobile robot operations
+type: software
+license: MIT
+repository-code: "https://github.com/minhochoe66/DEVS_simulation_framework"
+abstract: >-
+  A discrete event system specification (DEVS) simulation framework that
+  evaluates global and local path planning algorithms for autonomous mobile
+  robots consistently, from a single robot to a multi-robot fleet operation.
+  Perception, planning, maneuvering, fleet management, scheduling and equipment
+  operation are represented as coupled discrete-event models, and a unified
+  planner interface allows global and local algorithms to be replaced without
+  modifying the surrounding models.
+keywords:
+  - autonomous mobile robot
+  - path planning
+  - discrete event system specification
+  - discrete-event simulation
+  - performance evaluation
+  - fleet operation
+authors:
+  - family-names: Choi
+    given-names: Min-ho
+    affiliation: >-
+      Department of Industrial and Management Engineering, Hanyang University,
+      Seoul, Republic of Korea
+  - family-names: Sung
+    given-names: Jin-hyeon
+    affiliation: >-
+      Korea Institute of Industrial Technology, Cheonan, Republic of Korea
+  - family-names: Lee
+    given-names: Im-seok
+    affiliation: >-
+      Department of Industrial and Management Engineering, Hanyang University
+      ERICA, Ansan, Republic of Korea
+  - family-names: Seo
+    given-names: Kyung-min
+    affiliation: >-
+      Department of Industrial and Management Engineering, Hanyang University
+      ERICA, Ansan, Republic of Korea
+preferred-citation:
+  type: unpublished
+  title: >-
+    A DEVS-based simulation framework for evaluating path planning algorithms in
+    autonomous mobile robot operations
+  authors:
+    - family-names: Choi
+      given-names: Min-ho
+    - family-names: Sung
+      given-names: Jin-hyeon
+    - family-names: Lee
+      given-names: Im-seok
+    - family-names: Seo
+      given-names: Kyung-min
+  year: 2026
+  notes: >-
+    Manuscript under review. Update this entry with the journal, volume, pages
+    and DOI once the article is published.

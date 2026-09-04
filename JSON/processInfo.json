@@ -1,0 +1,43 @@
+{
+    "fileName": "processInfo",
+    "seqInfo": [
+        {
+            "seqNum": 1,
+            "sequenceList": [
+                "SOURCE",
+                "PROCESS_B1",
+                "PROCESS_C1",
+                "PROCESS_D1",
+                "SINK"
+            ]
+        },
+        {
+            "seqNum": 2,
+            "sequenceList": [
+                "SOURCE",
+                "PROCESS_B2",
+                "PROCESS_C2",
+                "PROCESS_D2",
+                "SINK"
+            ]
+        },
+        {
+            "seqNum": 3,
+            "sequenceList": [
+                "SOURCE",
+                "PROCESS_B3",
+                "PROCESS_C3",
+                "PROCESS_D3",
+                "SINK"
+            ]
+        }
+    ],
+    "performanceInfo": [
+        {
+            "A": 1.0,
+            "B": 0.9,
+            "C": 0.8,
+            "S": 1.2
+        }
+    ]
+}

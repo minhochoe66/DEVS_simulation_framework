@@ -1,0 +1,579 @@
+{
+    "fileName": "map",
+    "equipmentInfo": [
+        {
+            "equipmentID": "A-1",
+            "processType": "SOURCE",
+            "stageID": "STAGE_A",
+            "processTime": 0.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "A-1_IN",
+                "position": {
+                    "x": 10,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "A-1_OUT",
+                "position": {
+                    "x": 20,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "A-1_WORK",
+                "position": {
+                    "x": 15,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "B-1",
+            "processType": "PROCESS_B1",
+            "stageID": "STAGE_B",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "B-1_IN",
+                "position": {
+                    "x": 70,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "B-1_OUT",
+                "position": {
+                    "x": 80,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "B-1_WORK",
+                "position": {
+                    "x": 75,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "B-2",
+            "processType": "PROCESS_B2",
+            "stageID": "STAGE_B",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "B-2_IN",
+                "position": {
+                    "x": 70,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "B-2_OUT",
+                "position": {
+                    "x": 80,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "B-2_WORK",
+                "position": {
+                    "x": 75,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "B-3",
+            "processType": "PROCESS_B3",
+            "stageID": "STAGE_B",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "B-3_IN",
+                "position": {
+                    "x": 70,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "B-3_OUT",
+                "position": {
+                    "x": 80,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "B-3_WORK",
+                "position": {
+                    "x": 75,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "C-1",
+            "processType": "PROCESS_C1",
+            "stageID": "STAGE_C",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "C-1_IN",
+                "position": {
+                    "x": 130,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "C-1_OUT",
+                "position": {
+                    "x": 140,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "C-1_WORK",
+                "position": {
+                    "x": 135,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "C-2",
+            "processType": "PROCESS_C2",
+            "stageID": "STAGE_C",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "C-2_IN",
+                "position": {
+                    "x": 130,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "C-2_OUT",
+                "position": {
+                    "x": 140,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "C-2_WORK",
+                "position": {
+                    "x": 135,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "C-3",
+            "processType": "PROCESS_C3",
+            "stageID": "STAGE_C",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "C-3_IN",
+                "position": {
+                    "x": 130,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "C-3_OUT",
+                "position": {
+                    "x": 140,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "C-3_WORK",
+                "position": {
+                    "x": 135,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "D-1",
+            "processType": "PROCESS_D1",
+            "stageID": "STAGE_D",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "D-1_IN",
+                "position": {
+                    "x": 190,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "D-1_OUT",
+                "position": {
+                    "x": 200,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "D-1_WORK",
+                "position": {
+                    "x": 195,
+                    "y": 20
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "D-2",
+            "processType": "PROCESS_D2",
+            "stageID": "STAGE_D",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "D-2_IN",
+                "position": {
+                    "x": 190,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "D-2_OUT",
+                "position": {
+                    "x": 200,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "D-2_WORK",
+                "position": {
+                    "x": 195,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "D-3",
+            "processType": "PROCESS_D3",
+            "stageID": "STAGE_D",
+            "processTime": 10.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "D-3_IN",
+                "position": {
+                    "x": 190,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "D-3_OUT",
+                "position": {
+                    "x": 200,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "D-3_WORK",
+                "position": {
+                    "x": 195,
+                    "y": 80
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        },
+        {
+            "equipmentID": "OUT",
+            "processType": "SINK",
+            "stageID": "STAGE_OUT",
+            "processTime": 0.0,
+            "exchangeTime": 1.0,
+            "performance": "A",
+            "inputPort": {
+                "nodeID": "OUT_IN",
+                "position": {
+                    "x": 250,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "outputPort": {
+                "nodeID": "OUT_OUT",
+                "position": {
+                    "x": 260,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 5.0,
+                    "height": 5.0
+                }
+            },
+            "workPosition": {
+                "nodeID": "OUT_WORK",
+                "position": {
+                    "x": 255,
+                    "y": 50
+                },
+                "boundingBox": {
+                    "width": 6.0,
+                    "height": 6.0
+                }
+            }
+        }
+    ],
+    "WatingareaInfo": [
+        {
+            "areaID": "WAITING_AREA_A",
+            "position": {
+                "x": 35,
+                "y": 50
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_B_1",
+            "position": {
+                "x": 95,
+                "y": 20
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_B_2",
+            "position": {
+                "x": 95,
+                "y": 50
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_B_3",
+            "position": {
+                "x": 95,
+                "y": 80
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_C_1",
+            "position": {
+                "x": 155,
+                "y": 20
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_C_2",
+            "position": {
+                "x": 155,
+                "y": 50
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_C_3",
+            "position": {
+                "x": 155,
+                "y": 80
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_D_1",
+            "position": {
+                "x": 215,
+                "y": 20
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_D_2",
+            "position": {
+                "x": 215,
+                "y": 50
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_D_3",
+            "position": {
+                "x": 215,
+                "y": 80
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        },
+        {
+            "areaID": "WAITING_AREA_OUT",
+            "position": {
+                "x": 275,
+                "y": 50
+            },
+            "boundingBox": {
+                "width": 8.0,
+                "height": 8.0
+            }
+        }
+    ]
+}

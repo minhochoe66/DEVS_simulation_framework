@@ -1,0 +1,11 @@
+{
+    "fileName": "setup",
+    "numVehicles": 5,
+    "numJob": 1,
+    "numStages": 1,
+    "isTerminalOn": true,
+    "isVisualizerOn": true,
+    "Vehiclechange": true,
+    "monteCarlo": 2,
+    "renderTime": 0.1
+}
