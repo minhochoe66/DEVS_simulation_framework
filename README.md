@@ -60,7 +60,7 @@ flowchart TB
 
     subgraph PS["Physical System — modeling/simulation/PhysicalSystem/"]
         subgraph AMRM["AMR (coupled)"]
-            SEN["Sensor<br/>2-D ray casting"]
+            SEN["Sensor<br/>peer pose relay"]
             GPP["Global_Planner<br/>A*, Theta*, RRT, PRM"]
             LPP["Local_Planner<br/>DWA"]
             MAN["Maneuver<br/>differential-drive kinematics"]
