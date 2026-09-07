@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/)
-[![Formalism: DEVS](https://img.shields.io/badge/formalism-DEVS-informational.svg)](#simulation-engine)
+[![Formalism: DEVS](https://img.shields.io/badge/formalism-DEVS-informational.svg)](docs/ARCHITECTURE.md)
 
 Reference implementation for the article
 
@@ -37,62 +37,8 @@ Two properties make the framework useful as an evaluation testbed:
   the AMR on its own. This release ships the operation-level driver; see
   [Scope of this release](#scope-of-this-release).
 
-## Architecture
-
-The framework is organised into three layers, matching Fig. 1 of the article.
-
-```mermaid
-flowchart TB
-    subgraph EF["Experimental Frame — modeling/experiment/"]
-        GEN["Data_generator<br/>job arrivals, experiment conditions"]
-        COL["Data_collector<br/>trajectories, lead/wait time, throughput"]
-        MCA["MonteCarloAnalyzer<br/>replication statistics"]
-    end
-
-    subgraph CS["Control System — modeling/simulation/SystemController/"]
-        FMS["FleetManagement<br/>fleet state, transport orders to move commands"]
-        SCH["Scheduler<br/>job-equipment-robot matching"]
-    end
-
-    subgraph PS["Physical System — modeling/simulation/PhysicalSystem/"]
-        subgraph AMRM["AMR (coupled)"]
-            SEN["Sensor<br/>peer pose relay"]
-            GPP["Global_Planner<br/>A*, Theta*, RRT, PRM"]
-            LPP["Local_Planner<br/>DWA"]
-            MAN["Maneuver<br/>differential-drive kinematics"]
-        end
-        EQP["Equipment<br/>EMPTY, LOAD, BUSY, DONE, UNLOAD, INFORM"]
-    end
-
-    GEN -->|job| EQP
-    EQP -->|informDone / informFree| SCH
-    SCH -->|taskAssign| FMS
-    FMS -->|amrCommand / amrGoCommand| GPP
-    GPP -->|GlobalWaypoint_O| LPP
-    LPP -->|RequestManeuver_O| MAN
-    LPP -->|Replan| GPP
-    MAN -->|MyManeuverState_O| SEN
-    MAN -->|MyManeuverState_O| GPP
-    MAN -->|MyManeuverState_O| LPP
-    SEN -->|OtherManeuverState_O| LPP
-    MAN -->|MyManeuverState_O| FMS
-    MAN -->|MyManeuverState_O| COL
-    LPP -->|EquipmentDocking| EQP
-    EQP -->|jobExchange| LPP
-    COL --> MCA
-```
-
-`AMRSimModel` is the outermost coupled model; it wires the Experimental Frame to the
-Simulation Model, which in turn contains the Control System, every `AMR` instance and every
-`Equipment` instance. A detailed model-by-model specification — states, ports and time-advance
-behaviour — is in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-
-### Simulation engine
-
-`SimulationEngine/` is a self-contained Python DEVS kernel. It provides Classic DEVS
-(`ClassicDEVS/`), Dynamic Structure DEVS (`DynamicDEVS/`) and Multi-Resolution DEVS
-(`MRDEVS/`) base classes, an event-driven scheduler, a coupling graph and a Matplotlib-based
-live visualiser. The AMR models in `modeling/` are built entirely on these base classes.
+The DEVS model hierarchy — every atomic model, with its states, ports and time-advance
+behaviour — is specified in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Repository layout
 
